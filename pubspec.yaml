@@ -1,0 +1,31 @@
+name: route_memory_app
+description: A new Flutter project.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  flutter_riverpod: ^2.4.9
+  
+  flutter_map: ^6.1.0
+  latlong2: ^0.9.0
+  geolocator: ^10.1.0
+  
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  
+  intl: ^0.19.0
+  google_fonts: ^6.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true

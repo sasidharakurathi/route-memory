@@ -1,0 +1,23 @@
+Issues:
+	map is not getting centered to the device location. -> Done
+	Increase the route polling rate (more accurate routes) -> Done
+    In history page the direction of the travel is not working -> Fixed
+    inside the "start new route" page, need to add a back to home page button -> Done
+    inside the "start new route" page, remove back route button -> Done
+    instead of direclty changing the location of user, make a smooth transition of from the current user location to new gps location (like actually moving)
+    remove the points count display in the "start new route" page
+	
+features to add:
+	direction of the travel is not showing -> Done
+	show the distance travelled -> Done
+	give option to add check points with different names in a single route. -> Done
+
+	route history page features.
+		1. option to go to start point, check points and end points when user selects them. (app should try to show similar path to reach the selected point just like remembering the route that use travelled so that user can return to those points back in the same path) -> Done
+		2. show the directions (arrow marks on the route) which user travelled. -> Done
+ 
+    Delete a single history route or select some history routes and Delete them. -> Done
+    Add a button to clear all the history routes. -> Done
+
+    Rename the exisiting route's name. -> Done
+	
