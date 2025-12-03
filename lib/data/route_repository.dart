@@ -33,11 +33,13 @@ class SavedRoute {
 
   SavedRoute({required this.id, required this.name, required this.startTime, required this.points, this.totalDistance = 0.0, this.checkpoints = const []});
 
+  Duration get duration => points.isNotEmpty ? points.last.timestamp.difference(startTime) : Duration.zero;
+
   Map<String, dynamic> toMap() => {'id': id, 'name': name, 'startTime': startTime.millisecondsSinceEpoch, 'points': points.map((p) => p.toMap()).toList(), 'dist': totalDistance, 'stops': checkpoints.map((c) => c.toMap()).toList()};
   factory SavedRoute.fromMap(Map<String, dynamic> map, String docId) => SavedRoute(id: docId, name: map['name'] ?? 'Unnamed', startTime: DateTime.fromMillisecondsSinceEpoch(map['startTime'] ?? 0), points: (map['points'] as List<dynamic>? ?? []).map((x) => RoutePoint.fromMap(x)).toList(), totalDistance: (map['dist'] ?? 0.0).toDouble(), checkpoints: (map['stops'] as List<dynamic>? ?? []).map((x) => Checkpoint.fromMap(x)).toList());
 }
 
-// --- NEW MODEL: SAVED LOCATION ---
+
 class SavedLocation {
   final String id;
   final String name;
@@ -111,7 +113,26 @@ class RouteRepository {
     await _locationsRef.add(loc.toMap());
   }
 
+  
+  
+  Future<void> updateLocationName(String id, String newName) async {
+    await _locationsRef.doc(id).update({'name': newName});
+  }
+
   Future<void> deleteLocation(String id) async {
     await _locationsRef.doc(id).delete();
+  }
+
+  Future<void> deleteLocations(List<String> ids) async {
+    final batch = FirebaseFirestore.instance.batch();
+    for (var id in ids) batch.delete(_locationsRef.doc(id));
+    await batch.commit();
+  }
+
+  Future<void> clearAllLocations() async {
+    final snapshot = await _locationsRef.get();
+    final batch = FirebaseFirestore.instance.batch();
+    for (var doc in snapshot.docs) batch.delete(doc.reference);
+    await batch.commit();
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import '../data/route_repository.dart';
+import 'settings_provider.dart';
 
 final repositoryProvider = Provider((ref) => RouteRepository());
 
@@ -58,6 +59,84 @@ class TrackingNotifier extends StateNotifier<TrackingState> {
 
   TrackingNotifier(this.ref) : super(TrackingState());
 
+  
+
+  
+  
+  double _getPerpendicularDistance(RoutePoint p, RoutePoint a, RoutePoint b) {
+    final dist = const Distance();
+    
+    
+    final dx = b.longitude - a.longitude;
+    final dy = b.latitude - a.latitude;
+
+    if (dx == 0.0 && dy == 0.0) {
+      
+      return dist.as(LengthUnit.Meter, LatLng(p.latitude, p.longitude), LatLng(a.latitude, a.longitude));
+    }
+
+    
+    final t = ((p.longitude - a.longitude) * dx + (p.latitude - a.latitude) * dy) / (dx * dx + dy * dy);
+
+    double closestLat;
+    double closestLng;
+
+    if (t < 0) {
+      
+      closestLat = a.latitude;
+      closestLng = a.longitude;
+    } else if (t > 1) {
+      
+      closestLat = b.latitude;
+      closestLng = b.longitude;
+    } else {
+      
+      closestLat = a.latitude + t * dy;
+      closestLng = a.longitude + t * dx;
+    }
+
+    
+    return dist.as(LengthUnit.Meter, LatLng(p.latitude, p.longitude), LatLng(closestLat, closestLng));
+  }
+  
+  List<RoutePoint> _simplifyRouteRecursive(List<RoutePoint> points, double toleranceMeters) {
+    if (points.length < 3) return points;
+
+    double maxDistance = 0;
+    int maxIndex = 0;
+    final start = points.first;
+    final end = points.last;
+
+    
+    for (int i = 1; i < points.length - 1; i++) {
+        final current = points[i];
+        final dist = _getPerpendicularDistance(current, start, end);
+        if (dist > maxDistance) {
+            maxDistance = dist;
+            maxIndex = i;
+        }
+    }
+    
+    
+    if (maxDistance > toleranceMeters) {
+      
+      List<RoutePoint> recursiveResults1 = _simplifyRouteRecursive(points.sublist(0, maxIndex + 1), toleranceMeters);
+      
+      
+      List<RoutePoint> recursiveResults2 = _simplifyRouteRecursive(points.sublist(maxIndex, points.length), toleranceMeters);
+
+      
+      List<RoutePoint> result = [];
+      result.addAll(recursiveResults1.sublist(0, recursiveResults1.length - 1));
+      result.addAll(recursiveResults2);
+
+      return result;
+    } else {
+      
+      return [start, end];
+    }
+  }
+
   Future<void> startTracking() async {
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
@@ -74,22 +153,31 @@ class TrackingNotifier extends StateNotifier<TrackingState> {
     );
 
     LocationSettings locationSettings;
+    const accuracy = LocationAccuracy.bestForNavigation;
+    const distanceFilter = 0; 
+
     if (defaultTargetPlatform == TargetPlatform.android) {
       locationSettings = AndroidSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
-        distanceFilter: 0,
+        accuracy: accuracy,
+        distanceFilter: distanceFilter,
         forceLocationManager: true,
-        intervalDuration: const Duration(seconds: 1),
+        intervalDuration: const Duration(milliseconds: 500),
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: "Route Memory is Active",
+          notificationText: "Tracking your journey in background...",
+          enableWakeLock: true,
+        ),
       );
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       locationSettings = AppleSettings(
-        accuracy: LocationAccuracy.bestForNavigation,
+        accuracy: accuracy,
         activityType: ActivityType.fitness,
-        distanceFilter: 0,
+        distanceFilter: distanceFilter,
+        pauseLocationUpdatesAutomatically: false,
         showBackgroundLocationIndicator: true,
       );
     } else {
-      locationSettings = const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 0);
+      locationSettings = const LocationSettings(accuracy: accuracy, distanceFilter: distanceFilter);
     }
 
     _positionStream = Geolocator.getPositionStream(locationSettings: locationSettings)
@@ -104,6 +192,10 @@ class TrackingNotifier extends StateNotifier<TrackingState> {
             last.latitude, last.longitude,
             position.latitude, position.longitude
           );
+          
+          
+          if (addedDist < 1.5) return; 
+          
           if (addedDist < 0.5) addedDist = 0;
         }
 
@@ -136,15 +228,20 @@ class TrackingNotifier extends StateNotifier<TrackingState> {
     _positionStream = null;
 
     if (state.rawPoints.isNotEmpty) {
+      
+      
+      final simplifiedPoints = _simplifyRouteRecursive(state.rawPoints, 5.0);
+      debugPrint("Route simplified from ${state.rawPoints.length} points to ${simplifiedPoints.length} points.");
+      
       final newRoute = SavedRoute(
-        id: '', // Generated by Firebase
+        id: '', 
         name: routeName.isEmpty ? "Untitled Route" : routeName,
         startTime: state.rawPoints.first.timestamp,
-        points: List.from(state.rawPoints),
+        points: simplifiedPoints, 
         totalDistance: state.totalDistanceMeters,
         checkpoints: List.from(state.checkpoints),
       );
-      // Save to Firebase
+      
       await ref.read(repositoryProvider).addRoute(newRoute);
     }
     state = state.copyWith(isTracking: false);

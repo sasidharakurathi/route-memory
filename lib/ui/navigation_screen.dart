@@ -5,75 +5,88 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:flutter_compass/flutter_compass.dart';
+import '../logic/settings_provider.dart';
 import 'constants.dart';
+import 'widgets/user_location_marker.dart';
 
-// Custom painter for pin marker tip
-class _PinTipPainter extends CustomPainter {
-  final Color color;
-  _PinTipPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-
-    final path = ui.Path();
-    path.moveTo(size.width / 2 - 8, 0);
-    path.lineTo(size.width / 2 + 8, 0);
-    path.lineTo(size.width / 2, size.height);
-    path.close();
-
-    canvas.drawPath(path, paint);
-
-    final shadowPaint = Paint()
-      ..color = color.withOpacity(0.2)
-      ..style = PaintingStyle.fill;
-    final shadowPath = ui.Path();
-    shadowPath.moveTo(size.width / 2 - 8, 2);
-    shadowPath.lineTo(size.width / 2 + 8, 2);
-    shadowPath.lineTo(size.width / 2, size.height + 2);
-    shadowPath.close();
-    canvas.drawPath(shadowPath, shadowPaint);
-  }
-
-  @override
-  bool shouldRepaint(_PinTipPainter oldDelegate) => oldDelegate.color != color;
+class NavigationStep {
+  final String instruction;
+  final double distance;
+  final String maneuverType;
+  final String modifier;
+  NavigationStep({required this.instruction, required this.distance, required this.maneuverType, required this.modifier});
 }
 
-class NavigationScreen extends StatefulWidget {
+class NavigationScreen extends ConsumerStatefulWidget {
   final LatLng target;
   final String targetName;
   const NavigationScreen({super.key, required this.target, required this.targetName});
 
   @override
-  State<NavigationScreen> createState() => _NavigationScreenState();
+  ConsumerState<NavigationScreen> createState() => _NavigationScreenState();
 }
 
-class _NavigationScreenState extends State<NavigationScreen> {
+class _NavigationScreenState extends ConsumerState<NavigationScreen> with TickerProviderStateMixin {
   final MapController _mapController = MapController();
   LatLng? _userLocation;
-  double _currentHeading = 0.0;
+  
+  double _prevHeading = 0.0;
+  bool _isHeadsUpMode = false;
+  double _currentSpeed = 0.0;
+  bool _shouldAutoCenter = true;
+
   List<LatLng> _routePath = [];
   Duration _timeRemaining = Duration.zero;
   double _distanceRemaining = 0.0;
   StreamSubscription<Position>? _positionStream;
+  StreamSubscription<CompassEvent>? _compassStream;
   bool _isMapReady = false;
   LatLng? _lastFetchPos;
+  
+  List<NavigationStep> _steps = [];
+  NavigationStep? _currentStep;
 
   @override
   void initState() {
     super.initState();
     _startNavigation();
+    _startCompass();
   }
 
   @override
   void dispose() {
     _positionStream?.cancel();
+    _compassStream?.cancel();
     super.dispose();
+  }
+
+  void _startCompass() {
+    try {
+      _compassStream = FlutterCompass.events?.listen((event) {
+        if (!mounted || event.heading == null) return;
+        _updateHeadingSmoothly(event.heading!);
+      });
+    } catch (e) { debugPrint("Compass error: $e"); }
+  }
+
+  void _updateHeadingSmoothly(double newHeading) {
+    newHeading = (newHeading + 360) % 360;
+    double diff = newHeading - (_prevHeading % 360);
+    if (diff < -180) diff += 360;
+    if (diff > 180) diff -= 360;
+    
+    
+    _prevHeading += diff;
+    
+    if (_shouldAutoCenter && _userLocation != null && _isHeadsUpMode) {
+      _mapController.moveAndRotate(_userLocation!, 18.0, -_prevHeading);
+    }
   }
 
   void _startNavigation() async {
@@ -83,186 +96,198 @@ class _NavigationScreenState extends State<NavigationScreen> {
       if (permission == LocationPermission.denied) return;
     }
 
+    try {
+      final initialPos = await Geolocator.getCurrentPosition();
+      if (mounted) {
+        final startLatLng = LatLng(initialPos.latitude, initialPos.longitude);
+        _userLocation = startLatLng;
+        await _fetchRoadRoute(startLatLng, widget.target);
+        if (mounted) setState(() => _lastFetchPos = startLatLng);
+      }
+    } catch (e) { debugPrint("Error getting initial pos: $e"); }
+
     LocationSettings locationSettings;
     if (defaultTargetPlatform == TargetPlatform.android) {
-      locationSettings = AndroidSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 0, forceLocationManager: true, intervalDuration: const Duration(seconds: 1));
-    } else if (defaultTargetPlatform == TargetPlatform.iOS) {
-      locationSettings = AppleSettings(accuracy: LocationAccuracy.bestForNavigation, activityType: ActivityType.fitness, distanceFilter: 0, pauseLocationUpdatesAutomatically: false, showBackgroundLocationIndicator: true);
+      locationSettings = AndroidSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 0, forceLocationManager: true, intervalDuration: const Duration(milliseconds: 500));
     } else {
       locationSettings = const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 0);
     }
 
     _positionStream = Geolocator.getPositionStream(locationSettings: locationSettings).listen((Position position) {
       final userPos = LatLng(position.latitude, position.longitude);
-      double newHeading = position.heading;
-      if (newHeading == 0.0 && _userLocation != null) {
-        final dist = const Distance().as(LengthUnit.Meter, _userLocation!, userPos);
-        if (dist > 0.5) {
-          newHeading = Geolocator.bearingBetween(_userLocation!.latitude, _userLocation!.longitude, userPos.latitude, userPos.longitude);
-        } else {
-          newHeading = _currentHeading;
-        }
-      }
+      _currentSpeed = position.speed; 
+
       if (mounted) {
-        setState(() {
-          _userLocation = userPos;
-          _currentHeading = newHeading;
-        });
+        setState(() => _userLocation = userPos);
+        if (_isMapReady && _shouldAutoCenter) {
+          if (_isHeadsUpMode) {
+             _mapController.moveAndRotate(userPos, 18.0, -_prevHeading);
+          } else {
+             _mapController.move(userPos, 18.0);
+          }
+        }
         _updateRoute(userPos);
+        _updateCurrentStep(userPos);
       }
     });
   }
 
-  Future<void> _updateRoute(LatLng userPos) async {
-    if (_lastFetchPos == null || const Distance().as(LengthUnit.Meter, _lastFetchPos!, userPos) > 20) {
-      final newPath = await _fetchRoadRoute(userPos, widget.target);
-      if (mounted) {
-        setState(() {
-          _routePath = newPath;
-          _lastFetchPos = userPos;
-          _distanceRemaining = _calculatePathDistance(newPath);
-          _timeRemaining = Duration(seconds: (_distanceRemaining / 1.4).round());
-        });
-      }
+  void _updateCurrentStep(LatLng userPos) {
+    if (_steps.isNotEmpty) setState(() => _currentStep = _steps.first);
+  }
+
+  Future<void> _updateRoute(LatLng userPos, {bool force = false}) async {
+    if (force || _lastFetchPos == null || const Distance().as(LengthUnit.Meter, _lastFetchPos!, userPos) > 30) {
+      await _fetchRoadRoute(userPos, widget.target);
+      if (mounted) setState(() => _lastFetchPos = userPos);
     }
   }
 
-  Future<List<LatLng>> _fetchRoadRoute(LatLng start, LatLng end) async {
+  Future<void> _fetchRoadRoute(LatLng start, LatLng end) async {
     try {
-      final url = Uri.https('router.project-osrm.org', '/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}', {'overview': 'full', 'geometries': 'geojson'});
+      final url = Uri.https('router.project-osrm.org', '/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}', {'overview': 'full', 'geometries': 'geojson', 'steps': 'true'});
       final request = await HttpClient().getUrl(url);
-      request.headers.set(HttpHeaders.userAgentHeader, 'RouteMemoryApp/1.0 (flutter_student_project)');
+      request.headers.set(HttpHeaders.userAgentHeader, 'RouteMemoryApp/1.0');
       final response = await request.close();
       if (response.statusCode == 200) {
         final jsonString = await response.transform(utf8.decoder).join();
         final data = jsonDecode(jsonString);
         if (data['routes'] != null && (data['routes'] as List).isNotEmpty) {
-          final coordinates = data['routes'][0]['geometry']['coordinates'] as List;
-          return coordinates.map((c) => LatLng(c[1], c[0])).toList();
+          final route = data['routes'][0];
+          final coordinates = route['geometry']['coordinates'] as List;
+          List<NavigationStep> newSteps = [];
+          if (route['legs'] != null && route['legs'].isNotEmpty) {
+            final stepsJson = route['legs'][0]['steps'] as List;
+            for (var s in stepsJson) {
+              newSteps.add(NavigationStep(instruction: s['maneuver']['type'] == 'arrive' ? "Arrive" : (s['name'] != null ? "Turn onto ${s['name']}" : "Continue"), distance: (s['distance'] as num).toDouble(), maneuverType: s['maneuver']['type'] ?? '', modifier: s['maneuver']['modifier'] ?? ''));
+            }
+          }
+          if (mounted) {
+            setState(() {
+              _routePath = coordinates.map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())).toList();
+              final durationSeconds = (route['duration'] as num).toDouble();
+              _distanceRemaining = (route['distance'] as num).toDouble();
+              _timeRemaining = Duration(seconds: durationSeconds.toInt());
+              _steps = newSteps;
+              if (_steps.isNotEmpty && _currentStep == null) _currentStep = _steps.first;
+            });
+          }
         }
       }
-    } catch (e) {
-      debugPrint("Router Error: $e");
-    }
-    return [start, end];
+    } catch (e) { debugPrint("Router Error: $e"); }
   }
 
-  double _calculatePathDistance(List<LatLng> path) {
-    double totalDist = 0;
-    const distance = Distance();
-    for (int i = 0; i < path.length - 1; i++) {
-      totalDist += distance.as(LengthUnit.Meter, path[i], path[i + 1]);
+  void _toggleHeadsUpMode() {
+    setState(() => _isHeadsUpMode = !_isHeadsUpMode);
+    if (_userLocation != null) {
+      if (_isHeadsUpMode) {
+        _mapController.rotate(-_prevHeading);
+      } else {
+        _mapController.rotate(0.0);
+      }
+    } else {
+      _mapController.rotate(_isHeadsUpMode ? -_prevHeading : 0.0);
     }
-    return totalDist;
+  }
+
+  void _recenterMap() {
+    setState(() => _shouldAutoCenter = true);
+    if (_userLocation != null) {
+      if (_isHeadsUpMode) _mapController.moveAndRotate(_userLocation!, 18.0, -_prevHeading);
+      else _mapController.move(_userLocation!, 18.0);
+    }
+  }
+
+  String _formatTimeRemaining() {
+    if (_timeRemaining.inSeconds < 60) {
+      return "${_timeRemaining.inSeconds}s";
+    }
+    final mins = _timeRemaining.inMinutes;
+    final secs = _timeRemaining.inSeconds % 60;
+    if (secs == 0) return "${mins}m";
+    return "${mins}m ${secs}s";
   }
 
   @override
   Widget build(BuildContext context) {
+    final mapSettings = ref.watch(settingsProvider);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
+    final topPadding = MediaQuery.of(context).padding.top;
     final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final distStr = ref.read(settingsProvider.notifier).getFormattedDistance(_distanceRemaining);
+    final isNavigating = _currentStep != null;
+
+    final interactionFlags = _isHeadsUpMode 
+        ? mapSettings.interactionFlags & ~InteractiveFlag.rotate 
+        : mapSettings.interactionFlags;
+
     return Scaffold(
-      body: Stack(children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: widget.target,
-            initialZoom: 16.0,
-            onMapReady: () async {
-              setState(() => _isMapReady = true);
-              final pos = await Geolocator.getLastKnownPosition();
-              if (pos != null) _mapController.move(LatLng(pos.latitude, pos.longitude), 18.0);
-            }
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.sasidharakurathi.route_memory',
-              retinaMode: true,
-              maxNativeZoom: 19,
+      body: Stack(
+        children: [
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: widget.target, initialZoom: 18.0,
+              interactionOptions: InteractionOptions(flags: interactionFlags),
+              onMapReady: () async {
+                setState(() => _isMapReady = true);
+                final pos = await Geolocator.getLastKnownPosition();
+                if (pos != null) _mapController.move(LatLng(pos.latitude, pos.longitude), 18.0);
+              },
+              onPositionChanged: (pos, hasGesture) { if (hasGesture) setState(() => _shouldAutoCenter = false); },
             ),
-            if (_routePath.isNotEmpty) PolylineLayer(polylines: [Polyline(points: _routePath, strokeWidth: 6.0, color: kAccentColor, isDotted: true)]),
-            MarkerLayer(markers: [
-              Marker(
-                point: widget.target,
-                width: 100,
-                height: 100,
-                alignment: const Alignment(0.0, -0.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: kDangerColor,
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(20),
-                          topRight: Radius.circular(20),
-                          bottomLeft: Radius.circular(12),
-                          bottomRight: Radius.circular(12),
-                        ),
-                        boxShadow: [
-                          BoxShadow(color: kDangerColor.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4)),
-                        ],
-                        border: Border.all(color: Colors.white, width: 2),
-                      ),
-                      child: const Icon(Icons.location_on, color: Colors.white, size: 24),
-                    ),
-                    CustomPaint(
-                      size: const Size(40, 10),
-                      painter: _PinTipPainter(color: kDangerColor),
-                    ),
-                    if (widget.targetName.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: kDangerColor, width: 0.5),
-                            boxShadow: [
-                              BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2)),
-                            ],
-                          ),
-                          child: Text(
-                            widget.targetName,
-                            style: TextStyle(
-                              color: kDangerColor,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            maxLines: 1,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              if (_userLocation != null)
-                Marker(
-                  point: _userLocation!, 
-                  width: 60, 
-                  height: 60, 
-                  alignment: Alignment.center,
-                  child: Transform.rotate(
-                    angle: (_currentHeading * (math.pi / 180)), 
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white, 
-                        shape: BoxShape.circle, 
-                        boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 8)]
-                      ), 
-                      child: const Icon(Icons.arrow_upward_rounded, color: kPrimaryColor, size: 32)
-                    )
-                  )
+            children: [
+              if (isDark)
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.sasidharakurathi.routememory',
+                  retinaMode: mapSettings.retinaMode,
+                  panBuffer: mapSettings.panBuffer,
+                  tileBuilder: (context, widget, tile) {
+                    return ColorFiltered(
+                      colorFilter: const ColorFilter.matrix([
+                        -1,  0,  0, 0, 255, 
+                         0, -1,  0, 0, 255, 
+                         0,  0, -1, 0, 255, 
+                         0,  0,  0, 1,   0, 
+                      ]),
+                      child: widget,
+                    );
+                  },
                 )
-            ])
-          ]
-        ),
-        Positioned(top: MediaQuery.of(context).padding.top + 10, left: 16, child: GestureDetector(onTap: () => Navigator.pop(context), child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: kShadow), child: const Icon(Icons.arrow_back, color: Colors.black)))),
-        Positioned(bottom: 30 + bottomPadding, left: 16, right: 16, child: Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: Colors.white, borderRadius: kCardRadius, boxShadow: kShadow), child: Row(children: [Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text("Navigating to", style: TextStyle(color: Colors.grey[500], fontSize: 12, fontWeight: FontWeight.w600)), Text(widget.targetName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)), const SizedBox(height: 4), Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [Text(_timeRemaining.inMinutes.toString(), style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w800, color: kPrimaryColor)), const Text(" min", style: TextStyle(fontSize: 16, color: Colors.grey, fontWeight: FontWeight.w600)), const SizedBox(width: 12), Text("${(_distanceRemaining / 1000).toStringAsFixed(2)} km", style: const TextStyle(fontSize: 16, color: Colors.black54, fontWeight: FontWeight.w500))])])), GestureDetector(onTap: () { if (_userLocation != null) _mapController.move(_userLocation!, 18.0); }, child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: kPrimaryColor.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.navigation, size: 28, color: kPrimaryColor)))]))),
-      ]),
+              else
+                TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.sasidharakurathi.routememory', retinaMode: mapSettings.retinaMode, panBuffer: mapSettings.panBuffer),
+              
+              if (_routePath.isNotEmpty) PolylineLayer(polylines: [Polyline(points: _routePath, strokeWidth: 8.0, color: kAccentColor.withOpacity(0.8), strokeJoin: StrokeJoin.round)]),
+              MarkerLayer(markers: [
+                Marker(point: widget.target, width: 80, height: 80, child: const Icon(Icons.location_on, color: kDangerColor, size: 50)),
+                if (_userLocation != null) 
+                  Marker(
+                    point: _userLocation!, 
+                    width: 60, height: 60, 
+                    
+                    child: const RepaintBoundary(child: UserLocationMarker())
+                  )
+              ])
+            ]
+          ),
+          
+          if (!isNavigating) Positioned(top: topPadding + 16, left: 16, child: _buildBlurButton(icon: Icons.arrow_back, onTap: () => Navigator.pop(context), theme: theme)),
+          Positioned(top: topPadding + 16, right: 16, child: Column(children: [_buildBlurButton(icon: _isHeadsUpMode ? Icons.explore : Icons.explore_off, color: _isHeadsUpMode ? kPrimaryColor : (isDark ? Colors.white : Colors.black87), onTap: _toggleHeadsUpMode, theme: theme), const SizedBox(height: 12), _buildBlurButton(icon: Icons.my_location, color: _shouldAutoCenter ? kPrimaryColor : (isDark ? Colors.white54 : Colors.grey), onTap: _recenterMap, theme: theme)])),
+
+          Positioned(bottom: 30 + bottomPadding, left: 16, right: 16, child: Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: theme.cardColor, borderRadius: kCardRadius, boxShadow: kShadow), child: Row(children: [Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text("Navigating to", style: TextStyle(color: isDark ? Colors.white54 : Colors.grey[500], fontSize: 12, fontWeight: FontWeight.w600)), Text(widget.targetName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.textTheme.bodyMedium?.color)), const SizedBox(height: 4), Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+            Text(_formatTimeRemaining(), style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w800, color: kPrimaryColor)), 
+            const SizedBox(width: 12), 
+            Text(distStr, style: TextStyle(fontSize: 16, color: isDark ? Colors.white70 : Colors.black54, fontWeight: FontWeight.w500))
+          ])])), GestureDetector(onTap: () { Navigator.pop(context); }, child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: kDangerColor.withOpacity(0.1), shape: BoxShape.circle), child: Icon(Icons.close, size: 28, color: kDangerColor)))]))),
+        ]
+      ),
     );
+  }
+
+  Widget _buildBlurButton({required IconData icon, Color? color, required VoidCallback onTap, required ThemeData theme}) {
+    return GestureDetector(onTap: onTap, child: Container(margin: const EdgeInsets.all(8), width: 44, height: 44, decoration: BoxDecoration(color: theme.cardColor, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8)]), child: Icon(icon, color: color ?? theme.iconTheme.color, size: 24)));
   }
 }

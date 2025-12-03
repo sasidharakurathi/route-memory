@@ -33,9 +33,19 @@
 
 03 DEC 2025:  
   To add a search option in "Explore Map" screen (similar to Google Maps search) -> Done
-
   Bug: Fix Marker misplacements -> Done
+  Refactor the UI -> Done
+  Create Settings Screen with following sections: -> Done
+    - Profile                   -> Done
+    - Units Preferences         -> Done
+    - Map Performance           -> Done
+    - About                     -> Done
+  Implement Background Location Services (to keep tracking while the screen is off) -> Done
+  Optimizing battery usage for long trips. -> Done
+  Implement Themes (Dark / Light Mode) -> Done
   
-  Update the UI and fix any bugs found.
+04 DEC 2025:  
+  Add Loading Symbols to all the Screens
+  Enhance Search option (Dynamic Searching)
 
 	

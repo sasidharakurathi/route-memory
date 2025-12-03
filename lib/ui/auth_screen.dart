@@ -17,7 +17,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   final _passwordController = TextEditingController();
 
   static const kPrimaryColor = Color(0xFF2563EB);
-  static const kSurfaceColor = Color(0xFFF3F4F6);
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
@@ -36,7 +35,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               _passwordController.text.trim(),
             );
       }
-      // If successful, the Stream in main.dart will automatically switch screens
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -54,8 +52,11 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: kSurfaceColor,
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -67,7 +68,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: theme.cardColor,
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
@@ -83,10 +84,10 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               Text(
                 _isLogin ? "Welcome Back!" : "Create Account",
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.w800,
-                  color: Color(0xFF1E293B),
+                  color: theme.textTheme.bodyMedium?.color,
                   letterSpacing: -0.5,
                 ),
               ),
@@ -94,13 +95,13 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               Text(
                 _isLogin ? "Login to access your journeys" : "Start tracking your adventures today",
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.grey[500]),
+                style: TextStyle(fontSize: 16, color: isDark ? Colors.grey[400] : Colors.grey[500]),
               ),
               const SizedBox(height: 32),
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: theme.cardColor,
                   borderRadius: BorderRadius.circular(24),
                   boxShadow: [
                     BoxShadow(
@@ -116,15 +117,17 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                     children: [
                       TextFormField(
                         controller: _emailController,
+                        style: TextStyle(color: theme.textTheme.bodyMedium?.color),
                         decoration: InputDecoration(
                           hintText: "Email Address",
-                          prefixIcon: const Icon(Icons.email_outlined),
+                          hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
+                          prefixIcon: Icon(Icons.email_outlined, color: theme.iconTheme.color),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
                           ),
                           filled: true,
-                          fillColor: kSurfaceColor,
+                          fillColor: theme.scaffoldBackgroundColor,
                         ),
                         validator: (value) =>
                             (value == null || !value.contains('@')) ? "Enter a valid email" : null,
@@ -133,15 +136,17 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       TextFormField(
                         controller: _passwordController,
                         obscureText: true,
+                        style: TextStyle(color: theme.textTheme.bodyMedium?.color),
                         decoration: InputDecoration(
                           hintText: "Password",
-                          prefixIcon: const Icon(Icons.lock_outline_rounded),
+                          hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
+                          prefixIcon: Icon(Icons.lock_outline_rounded, color: theme.iconTheme.color),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
                           ),
                           filled: true,
-                          fillColor: kSurfaceColor,
+                          fillColor: theme.scaffoldBackgroundColor,
                         ),
                         validator: (value) =>
                             (value == null || value.length < 6) ? "Password must be 6+ chars" : null,
@@ -178,7 +183,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 children: [
                   Text(
                     _isLogin ? "Don't have an account? " : "Already have an account? ",
-                    style: TextStyle(color: Colors.grey[600]),
+                    style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600]),
                   ),
                   GestureDetector(
                     onTap: () => setState(() => _isLogin = !_isLogin),

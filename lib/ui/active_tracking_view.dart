@@ -10,8 +10,11 @@ import 'dart:math' as math;
 import 'package:geolocator/geolocator.dart';
 
 import '../logic/tracking_provider.dart';
-import '../logic/location_provider.dart';
+import '../logic/location_provider.dart'; 
+import '../logic/settings_provider.dart';
 import 'constants.dart';
+import 'widgets/user_location_marker.dart';
+
 
 Color _getCategoryColor(String category) {
   final colors = [
@@ -22,28 +25,21 @@ Color _getCategoryColor(String category) {
   return colors[category.hashCode.abs() % colors.length];
 }
 
-// Custom painter for pin marker tip
+
 class _PinTipPainter extends CustomPainter {
   final Color color;
   _PinTipPainter({required this.color});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-
+    final paint = Paint()..color = color..style = PaintingStyle.fill;
     final path = ui.Path();
     path.moveTo(size.width / 2 - 8, 0);
     path.lineTo(size.width / 2 + 8, 0);
     path.lineTo(size.width / 2, size.height);
     path.close();
-
     canvas.drawPath(path, paint);
-
-    final shadowPaint = Paint()
-      ..color = color.withOpacity(0.2)
-      ..style = PaintingStyle.fill;
+    final shadowPaint = Paint()..color = color.withOpacity(0.2)..style = PaintingStyle.fill;
     final shadowPath = ui.Path();
     shadowPath.moveTo(size.width / 2 - 8, 2);
     shadowPath.lineTo(size.width / 2 + 8, 2);
@@ -51,16 +47,12 @@ class _PinTipPainter extends CustomPainter {
     shadowPath.close();
     canvas.drawPath(shadowPath, shadowPaint);
   }
-
   @override
   bool shouldRepaint(_PinTipPainter oldDelegate) => oldDelegate.color != color;
 }
 
 class ActiveTrackingView extends ConsumerStatefulWidget {
-  final LatLng? initialTarget;
-  final String? initialTargetName;
-  const ActiveTrackingView(
-      {super.key, this.initialTarget, this.initialTargetName});
+  const ActiveTrackingView({super.key});
   @override
   ConsumerState<ActiveTrackingView> createState() => _ActiveTrackingViewState();
 }
@@ -68,439 +60,315 @@ class ActiveTrackingView extends ConsumerStatefulWidget {
 class _ActiveTrackingViewState extends ConsumerState<ActiveTrackingView> {
   final MapController _mapController = MapController();
   bool _shouldAutoCenter = true;
-  bool _showReturnPath = false;
-  LatLng? _initialPos;
   bool _isMapReady = false;
+  Timer? _timer;
+  Duration _duration = Duration.zero;
 
   @override
   void initState() {
     super.initState();
-  }
-
-  void _onMapReady() {
-    setState(() => _isMapReady = true);
-    _initLocation();
-  }
-
-  Future<void> _initLocation() async {
-    try {
-      final lastPos = await Geolocator.getLastKnownPosition();
-      if (lastPos != null && mounted && _isMapReady) {
-        setState(
-            () => _initialPos = LatLng(lastPos.latitude, lastPos.longitude));
-        final trackingState = ref.read(trackingProvider);
-        if (trackingState.currentPath.isEmpty)
-          _mapController.move(
-              LatLng(lastPos.latitude, lastPos.longitude), 16.0);
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return; 
+      
+      final state = ref.read(trackingProvider);
+      if (state.rawPoints.isNotEmpty) {
+        final startTime = state.rawPoints.first.timestamp;
+        setState(() {
+          _duration = DateTime.now().difference(startTime);
+        });
       }
-    } catch (e) {}
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration d) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final hours = twoDigits(d.inHours);
+    final minutes = twoDigits(d.inMinutes.remainder(60));
+    final seconds = twoDigits(d.inSeconds.remainder(60));
+    return "$hours:$minutes:$seconds";
+  }
+
+  void _recenterMap() {
+    setState(() => _shouldAutoCenter = true);
+    final trackingState = ref.read(trackingProvider);
+    if (trackingState.currentPath.isNotEmpty) {
+      _mapController.move(trackingState.currentPath.last, 18.0);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    
+    final mapSettings = ref.watch(settingsProvider);
     final trackingState = ref.watch(trackingProvider);
     final savedLocationsAsync = ref.watch(savedLocationsProvider);
+    
     final bottomPadding = MediaQuery.of(context).padding.bottom;
-    final LatLng displayPos = trackingState.currentPath.isNotEmpty
-        ? trackingState.currentPath.last
-        : (_initialPos ?? const LatLng(0, 0));
-    final startPos = trackingState.currentPath.isNotEmpty
-        ? trackingState.currentPath.first
-        : null;
-    final hasLiveData = trackingState.currentPath.isNotEmpty;
-    final distDisplay = trackingState.totalDistanceMeters > 1000
-        ? "${(trackingState.totalDistanceMeters / 1000).toStringAsFixed(2)} km"
-        : "${trackingState.totalDistanceMeters.toStringAsFixed(0)} m";
+    final topPadding = MediaQuery.of(context).padding.top;
+    
+    
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     ref.listen(trackingProvider, (prev, next) {
-      if (_isMapReady &&
-          next.currentPath.isNotEmpty &&
-          _shouldAutoCenter &&
-          !_showReturnPath) {
+      if (_isMapReady && next.currentPath.isNotEmpty && _shouldAutoCenter) {
         _mapController.move(next.currentPath.last, _mapController.camera.zoom);
       }
     });
 
+    final LatLng displayPos = trackingState.currentPath.isNotEmpty 
+        ? trackingState.currentPath.last 
+        : const LatLng(0, 0);
+
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
+      
+      value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
-        resizeToAvoidBottomInset: false,
         body: Stack(
           children: [
+            
             FlutterMap(
               mapController: _mapController,
               options: MapOptions(
-                onMapReady: _onMapReady,
-                initialCenter: displayPos,
+                onMapReady: () => setState(() => _isMapReady = true),
+                initialCenter: displayPos, 
                 initialZoom: 18.0,
-                onPositionChanged: (_, hasGesture) {
-                  if (hasGesture) setState(() => _shouldAutoCenter = false);
+                interactionOptions: InteractionOptions(flags: mapSettings.interactionFlags),
+                onPositionChanged: (_, hasGesture) { 
+                  if (hasGesture) setState(() => _shouldAutoCenter = false); 
                 },
               ),
               children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.sasidharakurathi.routememory',
-                  retinaMode: true,
-                  maxNativeZoom: 19,
-                ),
+                
+                if (isDark)
+                  TileLayer(
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.sasidharakurathi.routememory',
+                    retinaMode: mapSettings.retinaMode,
+                    panBuffer: mapSettings.panBuffer,
+                    tileBuilder: (context, widget, tile) {
+                      
+                      return ColorFiltered(
+                        colorFilter: const ColorFilter.matrix([
+                          -1,  0,  0, 0, 255, 
+                           0, -1,  0, 0, 255, 
+                           0,  0, -1, 0, 255, 
+                           0,  0,  0, 1,   0, 
+                        ]),
+                        child: widget,
+                      );
+                    },
+                  )
+                else
+                  TileLayer(
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.sasidharakurathi.routememory',
+                    retinaMode: mapSettings.retinaMode,
+                    panBuffer: mapSettings.panBuffer,
+                  ),
                 PolylineLayer(polylines: [
                   Polyline(
-                      points: trackingState.currentPath,
-                      strokeWidth: 6.0,
-                      color: kPrimaryColor),
-                  if (_showReturnPath && startPos != null)
-                    Polyline(
-                        points: [displayPos, startPos],
-                        strokeWidth: 4.0,
-                        color: kDangerColor.withOpacity(0.8),
-                        isDotted: true)
+                    points: trackingState.currentPath,
+                    strokeWidth: 6.0,
+                    color: kPrimaryColor,
+                    strokeJoin: StrokeJoin.round,
+                  )
                 ]),
-                savedLocationsAsync.when(
-                    data: (locs) => MarkerLayer(
-                        markers: locs
-                            .map((l) => Marker(
-                                point: LatLng(l.latitude, l.longitude),
-                                width: 100,
-                                height: 100,
-                                alignment: const Alignment(0.0, 0.0),
-                                child: GestureDetector(
-                                  onTap: () {},
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Container(
-                                        width: 40,
-                                        height: 40,
-                                        decoration: BoxDecoration(
-                                          color: _getCategoryColor(l.category),
-                                          borderRadius: const BorderRadius.only(
-                                            topLeft: Radius.circular(20),
-                                            topRight: Radius.circular(20),
-                                            bottomLeft: Radius.circular(12),
-                                            bottomRight: Radius.circular(12),
-                                          ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                                color: _getCategoryColor(l.category)
-                                                    .withOpacity(0.4),
-                                                blurRadius: 8,
-                                                offset: const Offset(0, 4)),
-                                          ],
-                                          border: Border.all(
-                                              color: Colors.white, width: 2),
-                                        ),
-                                        child: Icon(Icons.bookmark_rounded,
-                                            color: Colors.white,
-                                            size: 22),
-                                      ),
-                                      CustomPaint(
-                                        size: const Size(40, 10),
-                                        painter: _PinTipPainter(
-                                            color: _getCategoryColor(l.category)),
-                                      ),
-                                      if (l.name.isNotEmpty)
-                                        Padding(
-                                          padding:
-                                              const EdgeInsets.only(top: 4),
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 8, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white,
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                              border: Border.all(
-                                                  color: _getCategoryColor(l.category),
-                                                  width: 0.5),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                    color: Colors.black
-                                                        .withOpacity(0.1),
-                                                    blurRadius: 4,
-                                                    offset: const Offset(0, 2)),
-                                              ],
-                                            ),
-                                            child: Text(
-                                              l.name,
-                                              style: TextStyle(
-                                                color: _getCategoryColor(l.category),
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.bold,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                              maxLines: 1,
-                                            ),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                )))
-                            .toList()),
-                    loading: () => const MarkerLayer(markers: []),
-                    error: (_, __) => const MarkerLayer(markers: [])),
                 MarkerLayer(markers: [
+                  
+                  ...savedLocationsAsync.when(
+                    data: (locs) => locs.map((l) {
+                      final color = _getCategoryColor(l.category);
+                      return Marker(
+                        point: LatLng(l.latitude, l.longitude),
+                        width: 100, 
+                        height: 100,
+                        alignment: const Alignment(0.0, 0.0),
+                        child: Tooltip(
+                          message: l.name,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 40, height: 40,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius: const BorderRadius.only(
+                                    topLeft: Radius.circular(20), topRight: Radius.circular(20),
+                                    bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12),
+                                  ),
+                                  boxShadow: [BoxShadow(color: color.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))],
+                                  border: Border.all(color: Colors.white, width: 2),
+                                ),
+                                child: const Icon(Icons.location_on, color: Colors.white, size: 22),
+                              ),
+                              CustomPaint(size: const Size(40, 10), painter: _PinTipPainter(color: color)),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    loading: () => [],
+                    error: (_,__) => [],
+                  ),
+
+                  
                   for (var cp in trackingState.checkpoints)
                     Marker(
                       point: LatLng(cp.latitude, cp.longitude),
-                      width: 100,
-                      height: 100,
-                      alignment: const Alignment(0.0, 0.0),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: Colors.amber,
-                              borderRadius: const BorderRadius.only(
-                                topLeft: Radius.circular(20),
-                                topRight: Radius.circular(20),
-                                bottomLeft: Radius.circular(12),
-                                bottomRight: Radius.circular(12),
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                    color: Colors.amber.withOpacity(0.4),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 4)),
-                              ],
-                              border: Border.all(color: Colors.white, width: 2),
-                            ),
-                            child: const Center(
-                              child: Icon(Icons.star,
-                                  color: Colors.white, size: 22),
-                            ),
-                          ),
-                          CustomPaint(
-                            size: const Size(40, 10),
-                            painter: _PinTipPainter(color: Colors.amber),
-                          ),
-                          if (cp.name.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(
-                                      color: Colors.amber, width: 0.5),
-                                  boxShadow: [
-                                    BoxShadow(
-                                        color: Colors.black.withOpacity(0.1),
-                                        blurRadius: 4,
-                                        offset: const Offset(0, 2)),
-                                  ],
-                                ),
-                                child: Text(
-                                  cp.name,
-                                  style: const TextStyle(
-                                    color: Colors.amber,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  maxLines: 1,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
+                      width: 40, height: 40,
+                      child: const Icon(Icons.flag, color: Colors.orange, size: 30),
                     ),
-                  Marker(
+                  
+                  
+                  if (trackingState.currentPath.isNotEmpty)
+                    Marker(
                       point: displayPos,
-                      width: 60,
-                      height: 60,
-                      alignment: Alignment.center,
-                      child: hasLiveData
-                          ? Transform.rotate(
-                              angle: (trackingState.currentHeading *
-                                  (math.pi / 180)),
-                              child: Container(
-                                  decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                            color: Colors.black26,
-                                            blurRadius: 8)
-                                      ]),
-                                  child: const Icon(Icons.arrow_upward_rounded,
-                                      color: kPrimaryColor, size: 32)))
-                          : Container(
-                              decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.8),
-                                  shape: BoxShape.circle,
-                                  boxShadow: [
-                                    const BoxShadow(
-                                        color: Colors.black12, blurRadius: 4)
-                                  ]),
-                              child: const Icon(Icons.location_searching,
-                                  color: Colors.grey, size: 30))),
+                      width: 60, height: 60,
+                      child: const UserLocationMarker()
+                    ),
                 ]),
               ],
             ),
+
+            
             Positioned(
-                top: MediaQuery.of(context).padding.top + 10,
-                left: 16,
-                right: 16,
-                child: Row(children: [
+              top: topPadding + 16, 
+              left: 16,
+              child: _buildBlurButton(
+                icon: Icons.close_rounded,
+                onTap: () => _confirmDiscard(context, ref),
+                theme: theme 
+              )
+            ),
+
+            Positioned(
+              top: topPadding + 16, 
+              right: 16,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
                   _buildBlurButton(
-                      icon: Icons.close_rounded,
-                      color: Colors.black87,
-                      onTap: () => ref
-                          .read(trackingProvider.notifier)
-                          .discardTracking()),
-                  const Spacer(),
-                  if (!hasLiveData)
-                    Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
+                    icon: Icons.flag_rounded, 
+                    color: Colors.orange,
+                    onTap: () => _showCheckpointDialog(context, ref),
+                    theme: theme
+                  ),
+                  const SizedBox(height: 12),
+                  _buildBlurButton(
+                    icon: Icons.my_location,
+                    
+                    color: _shouldAutoCenter ? kPrimaryColor : (isDark ? Colors.white54 : Colors.black87),
+                    onTap: _recenterMap,
+                    theme: theme
+                  ),
+                ],
+              )
+            ),
+
+            
+            Positioned(
+              bottom: 30 + bottomPadding, 
+              left: 16, 
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.all(20), 
+                decoration: BoxDecoration(
+                  color: theme.cardColor, 
+                  borderRadius: kCardRadius, 
+                  boxShadow: kShadow
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start, 
+                        children: [
+                          Text(
+                            "Recording Journey...", 
+                            style: TextStyle(color: isDark ? Colors.white54 : Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _formatDuration(_duration), 
+                            style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w800, color: kPrimaryColor)
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            "${ref.read(settingsProvider.notifier).getFormattedDistance(trackingState.totalDistanceMeters)}  •  ${trackingState.checkpoints.length} stops",
+                            style: TextStyle(fontSize: 14, color: isDark ? Colors.white70 : Colors.black54, fontWeight: FontWeight.w600)
+                          ),
+                        ]
+                      )
+                    ), 
+                    
+                    const SizedBox(width: 16),
+                    GestureDetector(
+                      onTap: () => _handleStopAndSave(context, ref), 
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16), 
                         decoration: BoxDecoration(
-                            color: Colors.black87,
-                            borderRadius: BorderRadius.circular(20)),
-                        child: const Row(children: [
-                          SizedBox(
-                              width: 10,
-                              height: 10,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white)),
-                          SizedBox(width: 8),
-                          Text("Locating...",
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold))
-                        ])),
-                  const Spacer(),
-                  _buildBlurButton(
-                      icon: Icons.flag_rounded,
-                      color: Colors.amber[800]!,
-                      onTap: () => _showCheckpointDialog(context, ref))
-                ])),
-            Positioned(
-                bottom: 30 + bottomPadding,
-                left: 16,
-                right: 16,
-                child: Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: kCardRadius,
-                        boxShadow: kShadow),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            _buildStatItem(
-                                "DISTANCE", distDisplay, Icons.directions_walk),
-                            Container(
-                                width: 1, height: 30, color: Colors.grey[200]),
-                            _buildStatItem(
-                                "STOPS",
-                                "${trackingState.checkpoints.length}",
-                                Icons.pin_drop_outlined)
-                          ]),
-                      const SizedBox(height: 20),
-                      Row(children: [
-                        InkWell(
-                            onTap: () {
-                              if (!_isMapReady) return;
-                              setState(() {
-                                _shouldAutoCenter = true;
-                                _showReturnPath = false;
-                              });
-                              if (trackingState.currentPath.isNotEmpty)
-                                _mapController.move(
-                                    trackingState.currentPath.last, 18.0);
-                            },
-                            borderRadius: BorderRadius.circular(12),
-                            child: Container(
-                                width: 50,
-                                height: 50,
-                                decoration: BoxDecoration(
-                                    color: Colors.grey[100],
-                                    borderRadius: BorderRadius.circular(12)),
-                                child: Icon(
-                                    _shouldAutoCenter
-                                        ? Icons.gps_fixed
-                                        : Icons.gps_not_fixed,
-                                    color: Colors.grey[700]))),
-                        const SizedBox(width: 12),
-                        Expanded(
-                            child: SizedBox(
-                                height: 50,
-                                child: FilledButton.icon(
-                                    style: FilledButton.styleFrom(
-                                        backgroundColor: kDangerColor,
-                                        shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12))),
-                                    onPressed: () =>
-                                        _handleStopAndSave(context, ref),
-                                    icon: const Icon(Icons.stop_rounded),
-                                    label: const Text("Finish Route",
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.bold))))),
-                      ])
-                    ]))),
+                          color: kDangerColor, 
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(color: kDangerColor.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))
+                          ]
+                        ), 
+                        child: const Icon(Icons.stop_rounded, size: 32, color: Colors.white)
+                      )
+                    )
+                  ]
+                )
+              )
+            )
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBlurButton(
-      {required IconData icon,
-      Color color = Colors.black87,
-      required VoidCallback onTap}) {
+  
+  Widget _buildBlurButton({required IconData icon, Color? color, required VoidCallback onTap, required ThemeData theme}) {
     return GestureDetector(
-        onTap: onTap,
-        child: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.1), blurRadius: 10)
-                ]),
-            child: Icon(icon, color: color, size: 24)));
+      onTap: onTap, 
+      child: Container(
+        margin: const EdgeInsets.all(8), 
+        width: 44, height: 44, 
+        decoration: BoxDecoration(
+          color: theme.cardColor, 
+          shape: BoxShape.circle, 
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8)]
+        ), 
+        child: Icon(icon, color: color ?? theme.iconTheme.color, size: 24)
+      )
+    );
   }
 
-  Widget _buildStatItem(String label, String value, IconData icon) {
-    return Column(children: [
-      Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(value.split(' ')[0],
-                style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.black87)),
-            if (value.contains(' '))
-              Padding(
-                  padding: const EdgeInsets.only(left: 4),
-                  child: Text(value.split(' ')[1],
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey[500])))
-          ]),
-      const SizedBox(height: 2),
-      Text(label,
-          style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey[400],
-              letterSpacing: 0.5))
-    ]);
+  void _confirmDiscard(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context, 
+      builder: (ctx) => AlertDialog(
+        title: const Text("Discard Journey?"),
+        content: const Text("This will stop recording and delete current data."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: kDangerColor),
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref.read(trackingProvider.notifier).discardTracking();
+            }, 
+            child: const Text("Discard")
+          ),
+        ]
+      )
+    );
   }
 
   void _showCheckpointDialog(BuildContext context, WidgetRef ref) {
@@ -509,28 +377,20 @@ class _ActiveTrackingViewState extends ConsumerState<ActiveTrackingView> {
         context: context,
         builder: (ctx) => AlertDialog(
                 title: const Text("Add Checkpoint"),
-                scrollable: true,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
                 content: TextField(
                     controller: controller,
                     decoration: InputDecoration(
                         hintText: "Name this spot",
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         filled: true,
-                        fillColor: Colors.grey[50]),
+                        fillColor: Theme.of(context).scaffoldBackgroundColor),
                     autofocus: true),
                 actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text("Cancel")),
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
                   FilledButton(
                       onPressed: () {
                         if (controller.text.isNotEmpty)
-                          ref
-                              .read(trackingProvider.notifier)
-                              .addCheckpoint(controller.text);
+                          ref.read(trackingProvider.notifier).addCheckpoint(controller.text);
                         Navigator.pop(ctx);
                       },
                       child: const Text("Add"))
@@ -538,46 +398,33 @@ class _ActiveTrackingViewState extends ConsumerState<ActiveTrackingView> {
   }
 
   void _handleStopAndSave(BuildContext context, WidgetRef ref) {
-    final defaultName =
-        "Route ${DateFormat('MMM dd, h:mm a').format(DateTime.now())}";
+    final defaultName = "Route ${DateFormat('MMM dd, h:mm a').format(DateTime.now())}";
     final controller = TextEditingController(text: defaultName);
     showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
                 title: const Text("Finish & Save"),
-                scrollable: true,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
                 content: Column(
                     mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text("Give your journey a memorable name:"),
+                      const Text("Give your journey a name:"),
                       const SizedBox(height: 12),
                       TextField(
                           controller: controller,
                           autofocus: true,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
                           decoration: InputDecoration(
-                              hintText: "e.g., Morning Run",
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12)),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                               filled: true,
-                              fillColor: Colors.grey[50],
-                              prefixIcon: const Icon(Icons.edit_road)))
+                              fillColor: Theme.of(context).scaffoldBackgroundColor))
                     ]),
                 actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      child: const Text("Cancel")),
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
                   FilledButton(
                       onPressed: () {
-                        ref
-                            .read(trackingProvider.notifier)
-                            .stopTracking(controller.text);
+                        ref.read(trackingProvider.notifier).stopTracking(controller.text);
                         Navigator.pop(ctx);
                       },
-                      child: const Text("Save Route"))
+                      child: const Text("Save"))
                 ]));
   }
 }
