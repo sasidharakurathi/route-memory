@@ -1,122 +1,123 @@
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-@HiveType(typeId: 0)
+// --- EXISTING MODELS ---
 class RoutePoint {
-  @HiveField(0)
   final double latitude;
-  @HiveField(1)
   final double longitude;
-  @HiveField(2)
   final DateTime timestamp;
-  @HiveField(3)
   final double heading;
 
-  RoutePoint({
-    required this.latitude,
-    required this.longitude,
-    required this.timestamp,
-    this.heading = 0.0,
-  });
+  RoutePoint({required this.latitude, required this.longitude, required this.timestamp, this.heading = 0.0});
+
+  Map<String, dynamic> toMap() => {'lat': latitude, 'lng': longitude, 'time': timestamp.millisecondsSinceEpoch, 'head': heading};
+  factory RoutePoint.fromMap(Map<String, dynamic> map) => RoutePoint(latitude: map['lat'] ?? 0.0, longitude: map['lng'] ?? 0.0, timestamp: DateTime.fromMillisecondsSinceEpoch(map['time'] ?? 0), heading: (map['head'] ?? 0.0).toDouble());
 }
 
-@HiveType(typeId: 2)
 class Checkpoint {
-  @HiveField(0)
   final String name;
-  @HiveField(1)
   final double latitude;
-  @HiveField(2)
   final double longitude;
 
   Checkpoint({required this.name, required this.latitude, required this.longitude});
+  Map<String, dynamic> toMap() => {'n': name, 'lat': latitude, 'lng': longitude};
+  factory Checkpoint.fromMap(Map<String, dynamic> map) => Checkpoint(name: map['n'] ?? '', latitude: map['lat'] ?? 0.0, longitude: map['lng'] ?? 0.0);
 }
 
-@HiveType(typeId: 1)
-class SavedRoute extends HiveObject {
-  @HiveField(0)
+class SavedRoute {
   final String id;
-  @HiveField(1)
   final String name;
-  @HiveField(2)
   final DateTime startTime;
-  @HiveField(3)
   final List<RoutePoint> points;
-  @HiveField(4)
   final double totalDistance;
-  @HiveField(5)
   final List<Checkpoint> checkpoints;
 
-  SavedRoute({
+  SavedRoute({required this.id, required this.name, required this.startTime, required this.points, this.totalDistance = 0.0, this.checkpoints = const []});
+
+  Map<String, dynamic> toMap() => {'id': id, 'name': name, 'startTime': startTime.millisecondsSinceEpoch, 'points': points.map((p) => p.toMap()).toList(), 'dist': totalDistance, 'stops': checkpoints.map((c) => c.toMap()).toList()};
+  factory SavedRoute.fromMap(Map<String, dynamic> map, String docId) => SavedRoute(id: docId, name: map['name'] ?? 'Unnamed', startTime: DateTime.fromMillisecondsSinceEpoch(map['startTime'] ?? 0), points: (map['points'] as List<dynamic>? ?? []).map((x) => RoutePoint.fromMap(x)).toList(), totalDistance: (map['dist'] ?? 0.0).toDouble(), checkpoints: (map['stops'] as List<dynamic>? ?? []).map((x) => Checkpoint.fromMap(x)).toList());
+}
+
+// --- NEW MODEL: SAVED LOCATION ---
+class SavedLocation {
+  final String id;
+  final String name;
+  final String category; // e.g., "Home", "Food", "Park"
+  final double latitude;
+  final double longitude;
+
+  SavedLocation({
     required this.id,
     required this.name,
-    required this.startTime,
-    required this.points,
-    this.totalDistance = 0.0,
-    this.checkpoints = const [],
+    required this.category,
+    required this.latitude,
+    required this.longitude,
   });
-}
 
-class RoutePointAdapter extends TypeAdapter<RoutePoint> {
-  @override
-  final int typeId = 0;
-  @override
-  RoutePoint read(BinaryReader reader) {
-    return RoutePoint(
-      latitude: reader.readDouble(),
-      longitude: reader.readDouble(),
-      timestamp: DateTime.fromMillisecondsSinceEpoch(reader.readInt()),
-      heading: reader.readDouble(),
-    );
+  Map<String, dynamic> toMap() {
+    return {
+      'name': name,
+      'cat': category,
+      'lat': latitude,
+      'lng': longitude,
+      'created': DateTime.now().millisecondsSinceEpoch,
+    };
   }
-  @override
-  void write(BinaryWriter writer, RoutePoint obj) {
-    writer.writeDouble(obj.latitude);
-    writer.writeDouble(obj.longitude);
-    writer.writeInt(obj.timestamp.millisecondsSinceEpoch);
-    writer.writeDouble(obj.heading);
-  }
-}
 
-class CheckpointAdapter extends TypeAdapter<Checkpoint> {
-  @override
-  final int typeId = 2;
-  @override
-  Checkpoint read(BinaryReader reader) {
-    return Checkpoint(
-      name: reader.readString(),
-      latitude: reader.readDouble(),
-      longitude: reader.readDouble(),
+  factory SavedLocation.fromMap(Map<String, dynamic> map, String docId) {
+    return SavedLocation(
+      id: docId,
+      name: map['name'] ?? 'Unknown Place',
+      category: map['cat'] ?? 'Uncategorized',
+      latitude: map['lat'] ?? 0.0,
+      longitude: map['lng'] ?? 0.0,
     );
-  }
-  @override
-  void write(BinaryWriter writer, Checkpoint obj) {
-    writer.writeString(obj.name);
-    writer.writeDouble(obj.latitude);
-    writer.writeDouble(obj.longitude);
   }
 }
 
-class SavedRouteAdapter extends TypeAdapter<SavedRoute> {
-  @override
-  final int typeId = 1;
-  @override
-  SavedRoute read(BinaryReader reader) {
-    return SavedRoute(
-      id: reader.readString(),
-      name: reader.readString(),
-      startTime: DateTime.fromMillisecondsSinceEpoch(reader.readInt()),
-      points: (reader.readList()).cast<RoutePoint>(),
-      totalDistance: reader.readDouble(),
-      checkpoints: (reader.readList()).cast<Checkpoint>(),
-    );
+// --- REPOSITORY ---
+class RouteRepository {
+  String get _userId => FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+
+  // Route Collection
+  CollectionReference get _routesRef => FirebaseFirestore.instance.collection('users').doc(_userId).collection('routes');
+  
+  // NEW: Location Collection
+  CollectionReference get _locationsRef => FirebaseFirestore.instance.collection('users').doc(_userId).collection('locations');
+
+  // --- ROUTES (Existing) ---
+  Stream<List<SavedRoute>> watchRoutes() {
+    return _routesRef.orderBy('startTime', descending: true).snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) => SavedRoute.fromMap(doc.data() as Map<String, dynamic>, doc.id)).toList();
+    });
   }
-  @override
-  void write(BinaryWriter writer, SavedRoute obj) {
-    writer.writeString(obj.id);
-    writer.writeString(obj.name);
-    writer.writeInt(obj.startTime.millisecondsSinceEpoch);
-    writer.writeList(obj.points);
-    writer.writeDouble(obj.totalDistance);
-    writer.writeList(obj.checkpoints);
+  Future<void> addRoute(SavedRoute route) async => await _routesRef.add(route.toMap());
+  Future<void> updateRouteName(String id, String newName) async => await _routesRef.doc(id).update({'name': newName});
+  Future<void> deleteRoute(String id) async => await _routesRef.doc(id).delete();
+  Future<void> deleteRoutes(List<String> ids) async {
+    final batch = FirebaseFirestore.instance.batch();
+    for (var id in ids) batch.delete(_routesRef.doc(id));
+    await batch.commit();
+  }
+  Future<void> clearAll() async {
+    final snapshot = await _routesRef.get();
+    final batch = FirebaseFirestore.instance.batch();
+    for (var doc in snapshot.docs) batch.delete(doc.reference);
+    await batch.commit();
+  }
+
+  // --- NEW: LOCATIONS ---
+  Stream<List<SavedLocation>> watchLocations() {
+    return _locationsRef.orderBy('created', descending: true).snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) => SavedLocation.fromMap(doc.data() as Map<String, dynamic>, doc.id)).toList();
+    });
+  }
+
+  Future<void> addLocation(SavedLocation loc) async {
+    await _locationsRef.add(loc.toMap());
+  }
+
+  Future<void> deleteLocation(String id) async {
+    await _locationsRef.doc(id).delete();
   }
 }

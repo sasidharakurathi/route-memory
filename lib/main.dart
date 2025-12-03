@@ -1,30 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
-
-import 'data/route_repository.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'ui/home_screen.dart';
+import 'ui/auth_screen.dart';
+import 'logic/auth_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   
-  await Hive.initFlutter();
-  Hive.registerAdapter(RoutePointAdapter());
-  Hive.registerAdapter(SavedRouteAdapter());
-  Hive.registerAdapter(CheckpointAdapter());
+  // Note: We removed signInAnonymously() because we now have a real login screen.
 
   runApp(const ProviderScope(child: RouteMemoryApp()));
 }
 
-class RouteMemoryApp extends StatelessWidget {
+class RouteMemoryApp extends ConsumerWidget {
   const RouteMemoryApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF1B263B);
-    const accentColor = Color(0xFF4AD66D);
-    const surfaceColor = Color(0xFFF5F7FA);
+  Widget build(BuildContext context, WidgetRef ref) {
+    const primaryColor = Color(0xFF2563EB); 
+    const accentColor = Color(0xFF10B981);  
+    const surfaceColor = Color(0xFFF3F4F6); 
+
+    // Listen to Auth State
+    final authState = ref.watch(authStateProvider);
 
     return MaterialApp(
       title: 'Route Memory',
@@ -32,7 +33,6 @@ class RouteMemoryApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         scaffoldBackgroundColor: surfaceColor,
-        
         colorScheme: ColorScheme.fromSeed(
           seedColor: primaryColor,
           primary: primaryColor,
@@ -40,59 +40,31 @@ class RouteMemoryApp extends StatelessWidget {
           surface: Colors.white,
           background: surfaceColor,
         ),
-
-        textTheme: GoogleFonts.poppinsTextTheme(
-          Theme.of(context).textTheme,
-        ),
-
+        textTheme: GoogleFonts.poppinsTextTheme(Theme.of(context).textTheme),
         appBarTheme: AppBarTheme(
-          backgroundColor: surfaceColor,
-          foregroundColor: primaryColor,
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.black,
           elevation: 0,
           centerTitle: false,
           titleTextStyle: GoogleFonts.poppins(
-            color: primaryColor,
+            color: const Color(0xFF111827),
             fontSize: 24,
             fontWeight: FontWeight.w700,
           ),
         ),
-        
-        cardTheme: CardThemeData(
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          color: Colors.white,
-          margin: EdgeInsets.zero,
-        ),
-
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: primaryColor,
-          foregroundColor: Colors.white,
-          elevation: 4,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(16))),
-        ),
-        
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: surfaceColor,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        ),
-        
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: primaryColor,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            textStyle: const TextStyle(fontWeight: FontWeight.bold),
-          ),
-        ),
       ),
-      home: const HomeScreen(),
+      // Show Loading, Login, or Home based on Auth State
+      home: authState.when(
+        data: (user) {
+          if (user != null) {
+            return const HomeScreen();
+          } else {
+            return const AuthScreen();
+          }
+        },
+        loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
+        error: (err, stack) => Scaffold(body: Center(child: Text('Error: $err'))),
+      ),
     );
   }
 }

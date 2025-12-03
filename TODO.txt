@@ -1,4 +1,4 @@
-Issues:
+30 Nov 2025:
 	map is not getting centered to the device location. -> Done
 	Increase the route polling rate (more accurate routes) -> Done
     In history page the direction of the travel is not working -> Fixed
@@ -7,7 +7,6 @@ Issues:
     instead of direclty changing the location of user, make a smooth transition of from the current user location to new gps location (like actually moving)
     remove the points count display in the "start new route" page
 	
-features to add:
 	direction of the travel is not showing -> Done
 	show the distance travelled -> Done
 	give option to add check points with different names in a single route. -> Done
@@ -20,4 +19,23 @@ features to add:
     Add a button to clear all the history routes. -> Done
 
     Rename the exisiting route's name. -> Done
+
+01 DEC 2025:
+  To find another better free alternative of OpenStreetMap (CartoDB Voyager) -> Done
+  To migrate local HiveDB to online NoSQL (Firebase) -> Done
+  To implement signup and login system -> Done
+  To add "save location feature":
+    1. A new feature where user should be able to mark the locations and the app should be able to save these 
+    marks in the DB and display them in the maps. -> Done
+    
+    2. Also to add seperate menu to display all those location marks so that whenever user wants to travel to 
+    that location he can just click on one of them and the app should be able to show navigation to that location. -> Done
+
+03 DEC 2025:  
+  To add a search option in "Explore Map" screen (similar to Google Maps search) -> Done
+
+  Bug: Fix Marker misplacements -> Done
+  
+  Update the UI and fix any bugs found.
+
 	

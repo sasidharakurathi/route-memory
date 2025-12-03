@@ -1,7 +1,9 @@
-import 'dart:async';
-
-import 'package:flutter/material.dart';
+import 'dart:async'; 
+import 'dart:io';
+import 'dart:convert';
+import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -9,694 +11,113 @@ import 'package:latlong2/latlong.dart';
 import 'package:intl/intl.dart';
 import 'dart:math' as math;
 import 'package:geolocator/geolocator.dart';
-import 'dart:convert';
-import 'dart:io';
 
 import '../data/route_repository.dart';
 import '../logic/tracking_provider.dart';
+import '../logic/auth_provider.dart';
+import 'saved_places_screen.dart';
+import 'constants.dart';
 
-const kPrimaryColor = Color(0xFF2563EB); 
-const kAccentColor = Color(0xFF10B981);  
-const kDangerColor = Color(0xFFEF4444);  
-const kSurfaceColor = Colors.white;
-final kShadow = [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, 4))];
-final kCardRadius = BorderRadius.circular(24);
+// Imports for the extracted screens
+import 'explore_map_screen.dart';
+import 'active_tracking_view.dart';
+import 'navigation_screen.dart';
+
+// Custom painter for pin marker tip
+class _PinTipPainter extends CustomPainter {
+  final Color color;
+  _PinTipPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final path = ui.Path();
+    path.moveTo(size.width / 2 - 8, 0); // Left top
+    path.lineTo(size.width / 2 + 8, 0); // Right top
+    path.lineTo(size.width / 2, size.height); // Bottom point
+    path.close();
+
+    canvas.drawPath(path, paint);
+
+    // Shadow
+    final shadowPaint = Paint()
+      ..color = color.withOpacity(0.2)
+      ..style = PaintingStyle.fill;
+    final shadowPath = ui.Path();
+    shadowPath.moveTo(size.width / 2 - 8, 2);
+    shadowPath.lineTo(size.width / 2 + 8, 2);
+    shadowPath.lineTo(size.width / 2, size.height + 2);
+    shadowPath.close();
+    canvas.drawPath(shadowPath, shadowPaint);
+  }
+
+  @override
+  bool shouldRepaint(_PinTipPainter oldDelegate) => oldDelegate.color != color;
+}
+
+// -----------------------------------------------------------------------------
+// 1. HOME SCREEN
+// -----------------------------------------------------------------------------
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
-
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  final Set<dynamic> _selectedKeys = {}; 
+  final Set<String> _selectedKeys = {}; 
   bool get _isSelectionMode => _selectedKeys.isNotEmpty;
 
-  void _toggleSelection(dynamic key) {
+  void _toggleSelection(String key) {
     setState(() {
-      if (_selectedKeys.contains(key)) {
-        _selectedKeys.remove(key);
-      } else {
-        _selectedKeys.add(key);
-      }
+      if (_selectedKeys.contains(key)) _selectedKeys.remove(key);
+      else _selectedKeys.add(key);
     });
-  }
-
-  void _showAboutDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: kPrimaryColor.withOpacity(0.1), shape: BoxShape.circle),
-              child: const Icon(Icons.map_rounded, color: kPrimaryColor),
-            ),
-            const SizedBox(width: 12),
-            const Text("Route Memory"),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Version 0.0.1.1", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-            const SizedBox(height: 16),
-            const Text("A GPS tracking tool to record, manage, and retrace your journeys."),
-            const SizedBox(height: 16),
-            const Divider(),
-            const SizedBox(height: 8),
-            const Text("CREDITS", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
-            const SizedBox(height: 4),
-            const Text("• Developed with Flutter & Dart"),
-            const Text("• Maps by OpenStreetMap"),
-            const Text("• Routing by OSRM"),
-            const SizedBox(height: 16),
-            const Divider(),
-            const SizedBox(height: 8),
-            const Text("DEVELOPED BY", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
-            const Text("Sasidhar Akurathi"),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Close"),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showRenameDialog(SavedRoute route) {
     final controller = TextEditingController(text: route.name);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Rename Route"),
-        scrollable: true, 
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        content: TextField(
-          controller: controller,
-          decoration: InputDecoration(
-            hintText: "Enter new name",
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            filled: true,
-            fillColor: Colors.grey[50],
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          FilledButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) {
-                ref.read(savedRoutesProvider.notifier).renameRoute(route, controller.text);
-              }
-              Navigator.pop(ctx);
-            }, 
-            child: const Text("Rename")
-          ),
-        ],
-      ),
-    );
+    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("Rename Route"), scrollable: true, content: TextField(controller: controller, autofocus: true), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")), FilledButton(onPressed: () { if (controller.text.isNotEmpty) ref.read(repositoryProvider).updateRouteName(route.id, controller.text); Navigator.pop(ctx); }, child: const Text("Rename"))]));
   }
-
-  void _confirmDeleteSingle(SavedRoute route) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Delete Route"),
-        scrollable: true,
-        content: Text("Are you sure you want to delete '${route.name}'?"),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          TextButton(
-            style: TextButton.styleFrom(foregroundColor: kDangerColor),
-            onPressed: () {
-              ref.read(savedRoutesProvider.notifier).deleteRoute(route);
-              Navigator.pop(ctx);
-            }, 
-            child: const Text("Delete")
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _confirmDeleteSelected(List<SavedRoute> routes) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Delete Selection"),
-        scrollable: true,
-        content: Text("Delete ${_selectedKeys.length} selected routes?"),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: kDangerColor),
-            onPressed: () {
-              final toDelete = routes.where((r) => _selectedKeys.contains(r.key)).toList();
-              ref.read(savedRoutesProvider.notifier).deleteRoutes(toDelete);
-              setState(() => _selectedKeys.clear());
-              Navigator.pop(ctx);
-            }, 
-            child: const Text("Delete All")
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _confirmClearAll() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Clear All History"),
-        scrollable: true,
-        content: const Text("This cannot be undone. Delete everything?"),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: kDangerColor),
-            onPressed: () {
-              ref.read(savedRoutesProvider.notifier).clearAllRoutes();
-              Navigator.pop(ctx);
-            }, 
-            child: const Text("Clear All")
-          ),
-        ],
-      ),
-    );
-  }
+  void _confirmDeleteSingle(SavedRoute route) { showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("Delete?"), content: Text("Delete '${route.name}'?"), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")), TextButton(style: TextButton.styleFrom(foregroundColor: kDangerColor), onPressed: () { ref.read(repositoryProvider).deleteRoute(route.id); Navigator.pop(ctx); }, child: const Text("Delete"))])); }
+  void _confirmDeleteSelected(List<SavedRoute> routes) { showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("Delete Selection"), content: Text("Delete ${_selectedKeys.length} routes?"), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")), FilledButton(style: FilledButton.styleFrom(backgroundColor: kDangerColor), onPressed: () { ref.read(repositoryProvider).deleteRoutes(_selectedKeys.toList()); setState(() => _selectedKeys.clear()); Navigator.pop(ctx); }, child: const Text("Delete All"))])); }
+  void _confirmClearAll() { showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("Clear All History"), content: const Text("Permanently delete everything?"), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")), FilledButton(style: FilledButton.styleFrom(backgroundColor: kDangerColor), onPressed: () { ref.read(repositoryProvider).clearAll(); Navigator.pop(ctx); }, child: const Text("Clear All"))])); }
+  void _showAboutDialog() { showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("Route Memory"), content: const Text("Version 2.8\nGlobal Marker Fix."), actions: [TextButton(onPressed: () { Navigator.pop(ctx); ref.read(authRepositoryProvider).signOut(); }, style: TextButton.styleFrom(foregroundColor: Colors.red), child: const Text("Log Out")), FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text("Close"))])); }
+  
+  void _openExploreMap() { Navigator.push(context, MaterialPageRoute(builder: (_) => const ExploreMapScreen())); }
+  void _openSavedPlaces() { Navigator.push(context, MaterialPageRoute(builder: (_) => SavedPlacesScreen(onLocationSelected: (latlng, name) { Navigator.push(context, MaterialPageRoute(builder: (_) => NavigationScreen(target: latlng, targetName: name))); }))); }
 
   @override
   Widget build(BuildContext context) {
-    final routes = ref.watch(savedRoutesProvider);
+    final routesAsync = ref.watch(savedRoutesProvider);
     final isTracking = ref.watch(trackingProvider).isTracking;
-
     if (isTracking) return const ActiveTrackingView();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF3F4F6),
-      resizeToAvoidBottomInset: false, 
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            title: _isSelectionMode 
-                ? Text("${_selectedKeys.length} Selected", style: const TextStyle(fontWeight: FontWeight.bold))
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text("Route Memory", style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-                      Row(
-                        children: [
-                          if (routes.isNotEmpty)
-                            IconButton(
-                              icon: const Icon(Icons.delete_sweep_outlined, color: Colors.grey),
-                              tooltip: "Clear All History",
-                              onPressed: _confirmClearAll,
-                            ),
-                          IconButton(
-                            icon: const Icon(Icons.info_outline_rounded, color: Colors.grey),
-                            tooltip: "About",
-                            onPressed: _showAboutDialog,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-            centerTitle: false,
-            elevation: 0,
-            backgroundColor: kSurfaceColor,
-            surfaceTintColor: kSurfaceColor,
-            leading: _isSelectionMode 
-                ? IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => _selectedKeys.clear()))
-                : null,
-            actions: [
-              if (_isSelectionMode)
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, color: kDangerColor),
-                  onPressed: () => _confirmDeleteSelected(routes),
-                ),
-              const SizedBox(width: 8),
-            ],
-          ),
-          if (routes.isEmpty)
-            SliverFillRemaining(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: kShadow),
-                      child: Icon(Icons.map_rounded, size: 64, color: Colors.blue[100]),
-                    ),
-                    const SizedBox(height: 24),
-                    Text("No routes yet", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[800])),
-                    const SizedBox(height: 8),
-                    Text("Hit the + button to start exploring.", style: TextStyle(color: Colors.grey[500])),
-                  ],
-                ),
-              ),
-            )
-          else
-            SliverPadding(
-              padding: const EdgeInsets.all(16),
-              sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final route = routes[index];
-                    final isSelected = _selectedKeys.contains(route.key);
-                    return _buildRouteCard(route, isSelected);
-                  },
-                  childCount: routes.length,
-                ),
-              ),
-            ),
-          const SliverToBoxAdapter(child: SizedBox(height: 80)),
-        ],
-      ),
-      floatingActionButton: _isSelectionMode 
-          ? null 
-          : FloatingActionButton.extended(
-              onPressed: () => ref.read(trackingProvider.notifier).startTracking(),
-              label: const Text("New Journey"),
-              icon: const Icon(Icons.add_location_alt_outlined),
-              backgroundColor: kPrimaryColor,
-              foregroundColor: Colors.white,
-              elevation: 4,
-            ),
+      resizeToAvoidBottomInset: false,
+      body: CustomScrollView(slivers: [SliverAppBar(title: _isSelectionMode ? Text("${_selectedKeys.length} Selected", style: const TextStyle(fontWeight: FontWeight.bold)) : Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text("Route Memory", style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.5)), Row(children: [IconButton(icon: const Icon(Icons.bookmark_outline, color: kPrimaryColor), tooltip: "Saved Places", onPressed: _openSavedPlaces), IconButton(icon: const Icon(Icons.delete_sweep_outlined, color: Colors.grey), onPressed: _confirmClearAll), IconButton(icon: const Icon(Icons.account_circle_outlined, color: kPrimaryColor), onPressed: _showAboutDialog)])]), backgroundColor: kSurfaceColor, leading: _isSelectionMode ? IconButton(icon: const Icon(Icons.close), onPressed: () => setState(() => _selectedKeys.clear())) : null, actions: [if (_isSelectionMode) IconButton(icon: const Icon(Icons.delete_outline, color: kDangerColor), onPressed: () => routesAsync.whenData((d) => _confirmDeleteSelected(d))), const SizedBox(width: 8)]), routesAsync.when(loading: () => const SliverFillRemaining(child: Center(child: CircularProgressIndicator())), error: (err, stack) => SliverFillRemaining(child: Center(child: Text("Error: $err"))), data: (routes) { if (routes.isEmpty) return SliverFillRemaining(child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.cloud_off, size: 64, color: Colors.blue[100]), const SizedBox(height: 24), Text("No routes yet", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey[800]))]))); return SliverPadding(padding: const EdgeInsets.all(16), sliver: SliverList(delegate: SliverChildBuilderDelegate((context, index) { final route = routes[index]; final isSelected = _selectedKeys.contains(route.id); return _buildRouteCard(route, isSelected); }, childCount: routes.length))); }), const SliverToBoxAdapter(child: SizedBox(height: 120))]),
+      floatingActionButton: _isSelectionMode ? null : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.end, children: [FloatingActionButton.extended(heroTag: "explore", onPressed: _openExploreMap, label: const Text("Explore Map"), icon: const Icon(Icons.map), backgroundColor: Colors.white, foregroundColor: kPrimaryColor, elevation: 4), const SizedBox(height: 16), FloatingActionButton.extended(heroTag: "start", onPressed: () => ref.read(trackingProvider.notifier).startTracking(), label: const Text("New Journey"), icon: const Icon(Icons.add_location_alt_outlined), backgroundColor: kPrimaryColor, foregroundColor: Colors.white, elevation: 4)]),
     );
   }
 
   Widget _buildRouteCard(SavedRoute route, bool isSelected) {
-    final distStr = route.totalDistance > 1000 
-        ? "${(route.totalDistance/1000).toStringAsFixed(2)} km"
-        : "${route.totalDistance.toStringAsFixed(0)} m";
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: isSelected ? Colors.blue[50] : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: isSelected ? Border.all(color: kPrimaryColor, width: 2) : null,
-        boxShadow: kShadow,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onLongPress: () => _toggleSelection(route.key),
-          onTap: () {
-            if (_isSelectionMode) {
-              _toggleSelection(route.key);
-            } else {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => RouteDetailScreen(route: route)));
-            }
-          },
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Container(
-                  width: 50, height: 50,
-                  decoration: BoxDecoration(
-                    color: isSelected ? kPrimaryColor : const Color(0xFFEFF6FF),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    isSelected ? Icons.check : Icons.directions_walk_rounded, 
-                    color: isSelected ? Colors.white : kPrimaryColor
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(route.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      const SizedBox(height: 4),
-                      Text(
-                        "${DateFormat.yMMMd().format(route.startTime)}  •  $distStr", 
-                        style: TextStyle(fontSize: 13, color: Colors.grey[600], fontWeight: FontWeight.w500)
-                      ),
-                    ],
-                  ),
-                ),
-                if (!_isSelectionMode)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.grey),
-                        onPressed: () => _showRenameDialog(route),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 20, color: Colors.grey),
-                        onPressed: () => _confirmDeleteSingle(route),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+    final distStr = route.totalDistance > 1000 ? "${(route.totalDistance/1000).toStringAsFixed(2)} km" : "${route.totalDistance.toStringAsFixed(0)} m";
+    return Container(margin: const EdgeInsets.only(bottom: 12), decoration: BoxDecoration(color: isSelected ? Colors.blue[50] : Colors.white, borderRadius: BorderRadius.circular(16), border: isSelected ? Border.all(color: kPrimaryColor, width: 2) : null, boxShadow: kShadow), child: Material(color: Colors.transparent, child: InkWell(borderRadius: BorderRadius.circular(16), onLongPress: () => _toggleSelection(route.id), onTap: () { if (_isSelectionMode) _toggleSelection(route.id); else Navigator.push(context, MaterialPageRoute(builder: (_) => RouteDetailScreen(route: route))); }, child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [Container(width: 50, height: 50, decoration: BoxDecoration(color: isSelected ? kPrimaryColor : const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(12)), child: Icon(isSelected ? Icons.check : Icons.cloud_done_rounded, color: isSelected ? Colors.white : kPrimaryColor)), const SizedBox(width: 16), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(route.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 4), Text("${DateFormat.yMMMd().format(route.startTime)}  •  $distStr", style: TextStyle(fontSize: 13, color: Colors.grey[600], fontWeight: FontWeight.w500))])), if (!_isSelectionMode) Row(mainAxisSize: MainAxisSize.min, children: [IconButton(icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.grey), onPressed: () => _showRenameDialog(route)), IconButton(icon: const Icon(Icons.delete_outline, size: 20, color: Colors.grey), onPressed: () => _confirmDeleteSingle(route))])])))));
   }
 }
 
-class ActiveTrackingView extends ConsumerStatefulWidget {
-  const ActiveTrackingView({super.key});
-  @override
-  ConsumerState<ActiveTrackingView> createState() => _ActiveTrackingViewState();
-}
-
-class _ActiveTrackingViewState extends ConsumerState<ActiveTrackingView> {
-  final MapController _mapController = MapController();
-  bool _shouldAutoCenter = true;
-  bool _showReturnPath = false; 
-  LatLng? _initialPos;
-  bool _isMapReady = false;
-
-  @override
-  void initState() {
-    super.initState();
-  }
-
-  void _onMapReady() {
-    setState(() => _isMapReady = true);
-    _initLocation();
-  }
-
-  Future<void> _initLocation() async {
-    try {
-      final lastPos = await Geolocator.getLastKnownPosition();
-      if (lastPos != null && mounted && _isMapReady) {
-        setState(() => _initialPos = LatLng(lastPos.latitude, lastPos.longitude));
-        final trackingState = ref.read(trackingProvider);
-        if (trackingState.currentPath.isEmpty) {
-          _mapController.move(LatLng(lastPos.latitude, lastPos.longitude), 16.0);
-        }
-      }
-    } catch (e) {
-      debugPrint("Location Init Error: $e");
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final trackingState = ref.watch(trackingProvider);
-    final LatLng displayPos;
-    final bool hasLiveData = trackingState.currentPath.isNotEmpty;
-    
-    if (hasLiveData) {
-      displayPos = trackingState.currentPath.last;
-    } else if (_initialPos != null) {
-      displayPos = _initialPos!;
-    } else {
-      displayPos = const LatLng(0, 0); 
-    }
-
-    final startPos = trackingState.currentPath.isNotEmpty ? trackingState.currentPath.first : null;
-    
-    ref.listen(trackingProvider, (prev, next) {
-      if (_isMapReady && next.currentPath.isNotEmpty && _shouldAutoCenter && !_showReturnPath) {
-         _mapController.move(next.currentPath.last, _mapController.camera.zoom);
-      }
-    });
-
-    final dist = trackingState.totalDistanceMeters;
-    final distDisplay = dist > 1000 ? "${(dist/1000).toStringAsFixed(2)} km" : "${dist.toStringAsFixed(0)} m";
-    
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark,
-      child: Scaffold(
-        resizeToAvoidBottomInset: false, 
-        body: Stack(
-          children: [
-            FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                onMapReady: _onMapReady, 
-                initialCenter: displayPos, 
-                initialZoom: 18.0,
-                onPositionChanged: (_, hasGesture) {
-                  if (hasGesture) setState(() => _shouldAutoCenter = false);
-                },
-              ),
-              children: [
-                TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.example.route_memory'),
-                PolylineLayer(
-                  polylines: [
-                    Polyline(points: trackingState.currentPath, strokeWidth: 6.0, color: kPrimaryColor),
-                    if (_showReturnPath && startPos != null)
-                       Polyline(points: [displayPos, startPos], strokeWidth: 4.0, color: kDangerColor.withOpacity(0.8), isDotted: true),
-                  ],
-                ),
-                MarkerLayer(markers: [
-                  for (var cp in trackingState.checkpoints)
-                    Marker(
-                      point: LatLng(cp.latitude, cp.longitude), width: 40, height: 40,
-                      child: const Icon(Icons.star, color: Colors.amber, size: 36),
-                    ),
-                  
-                  Marker(
-                    point: displayPos, 
-                    width: 60, height: 60,
-                    child: hasLiveData 
-                      ? Transform.rotate(
-                          angle: (trackingState.currentHeading * (math.pi / 180)),
-                          child: Container(
-                            decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 8)]),
-                            child: const Icon(Icons.arrow_upward_rounded, color: kPrimaryColor, size: 32),
-                          ),
-                        )
-                      : Container( 
-                          decoration: BoxDecoration(color: Colors.white.withOpacity(0.8), shape: BoxShape.circle, boxShadow: [const BoxShadow(color: Colors.black12, blurRadius: 4)]),
-                          child: const Icon(Icons.location_searching, color: Colors.grey, size: 30),
-                        ),
-                  ),
-                ]),
-              ],
-            ),
-
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 10, 
-              left: 16, right: 16,
-              child: Row(
-                children: [
-                  _buildBlurButton(
-                    icon: Icons.close_rounded,
-                    color: Colors.black87,
-                    onTap: () => ref.read(trackingProvider.notifier).discardTracking(),
-                  ),
-                  const Spacer(),
-                  if (!hasLiveData)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(20)),
-                      child: const Row(
-                        children: [
-                          SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
-                          SizedBox(width: 8),
-                          Text("Locating...", style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                    ),
-                  const Spacer(),
-                  _buildBlurButton(
-                    icon: Icons.flag_rounded,
-                    color: Colors.amber[800]!,
-                    onTap: () => _showCheckpointDialog(context, ref),
-                  ),
-                ],
-              ),
-            ),
-
-            Positioned(
-              bottom: 30, left: 16, right: 16,
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: kCardRadius,
-                  boxShadow: kShadow,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildStatItem("DISTANCE", distDisplay, Icons.directions_walk),
-                        Container(width: 1, height: 30, color: Colors.grey[200]),
-                        _buildStatItem("STOPS", "${trackingState.checkpoints.length}", Icons.pin_drop_outlined),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      children: [
-                        InkWell(
-                          onTap: () {
-                             if (!_isMapReady) return;
-                             setState(() { _shouldAutoCenter = true; _showReturnPath = false; });
-                             if (trackingState.currentPath.isNotEmpty) _mapController.move(trackingState.currentPath.last, 18.0);
-                          },
-                          borderRadius: BorderRadius.circular(12),
-                          child: Container(
-                            width: 50, height: 50,
-                            decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(12)),
-                            child: Icon(_shouldAutoCenter ? Icons.gps_fixed : Icons.gps_not_fixed, color: Colors.grey[700]),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: SizedBox(
-                            height: 50,
-                            child: FilledButton.icon(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: kDangerColor,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              ),
-                              onPressed: () => _handleStopAndSave(context, ref),
-                              icon: const Icon(Icons.stop_rounded),
-                              label: const Text("Finish Route", style: TextStyle(fontWeight: FontWeight.bold)),
-                            ),
-                          ),
-                        ),
-                      ],
-                    )
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBlurButton({required IconData icon, required Color color, required VoidCallback onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 44, height: 44,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10)],
-        ),
-        child: Icon(icon, color: color, size: 24),
-      ),
-    );
-  }
-
-  Widget _buildStatItem(String label, String value, IconData icon) {
-    return Column(
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(value.split(' ')[0], style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Colors.black87)),
-            if (value.contains(' '))
-              Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: Text(value.split(' ')[1], style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey[500])),
-              ),
-          ],
-        ),
-        const SizedBox(height: 2),
-        Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey[400], letterSpacing: 0.5)),
-      ],
-    );
-  }
-
-  void _showCheckpointDialog(BuildContext context, WidgetRef ref) {
-    final controller = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Add Checkpoint"),
-        scrollable: true,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        content: TextField(
-          controller: controller, 
-          decoration: InputDecoration(
-            hintText: "Name this spot", 
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            filled: true,
-            fillColor: Colors.grey[50],
-          ), 
-          autofocus: true
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          FilledButton(onPressed: () { if (controller.text.isNotEmpty) ref.read(trackingProvider.notifier).addCheckpoint(controller.text); Navigator.pop(ctx); }, child: const Text("Add")),
-        ],
-      ),
-    );
-  }
-
-  void _handleStopAndSave(BuildContext context, WidgetRef ref) {
-    final defaultName = "Route ${DateFormat('MMM dd, h:mm a').format(DateTime.now())}";
-    final controller = TextEditingController(text: defaultName);
-    
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Finish & Save"),
-        scrollable: true,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Give your journey a memorable name:"),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-              decoration: InputDecoration(
-                hintText: "e.g., Morning Run",
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                filled: true,
-                fillColor: Colors.grey[50],
-                prefixIcon: const Icon(Icons.edit_road),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          FilledButton(
-            onPressed: () {
-              ref.read(trackingProvider.notifier).stopTracking(controller.text);
-              Navigator.pop(ctx);
-            },
-            child: const Text("Save Route"),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// -----------------------------------------------------------------------------
+// 3. DETAIL SCREEN (Navigation Mode)
+// -----------------------------------------------------------------------------
 
 class RouteDetailScreen extends ConsumerStatefulWidget {
   final SavedRoute route;
   const RouteDetailScreen({super.key, required this.route});
-
   @override
   ConsumerState<RouteDetailScreen> createState() => _RouteDetailScreenState();
 }
@@ -709,7 +130,6 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   StreamSubscription<Position>? _positionStream;
   LatLng? _userLocation;
   double _currentHeading = 0.0;
-  
   Duration _timeRemaining = Duration.zero;
   double _distanceRemaining = 0.0;
   LatLng? _lastFetchPos; 
@@ -828,12 +248,20 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
           FlutterMap(
             options: MapOptions(initialCenter: LatLng(centerLat, centerLng), initialZoom: 15.0),
             children: [
-              TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.example'),
-              PolylineLayer(polylines: [
-                Polyline(points: path, strokeWidth: 6.0, color: _isNavigating ? kPrimaryColor.withOpacity(0.5) : kPrimaryColor),
-                if (_isNavigating && _navigationPath.isNotEmpty)
-                  Polyline(points: _navigationPath, strokeWidth: 6.0, color: kAccentColor, isDotted: true),
-              ]),
+              // CHANGED: OSM Standard Tiles
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.route_memory',
+                retinaMode: true,
+                maxNativeZoom: 19, // FIX ADDED
+              ),
+              PolylineLayer(
+                polylines: [
+                  Polyline(points: path, strokeWidth: 6.0, color: _isNavigating ? kPrimaryColor.withOpacity(0.5) : kPrimaryColor),
+                  if (_isNavigating && _navigationPath.isNotEmpty)
+                    Polyline(points: _navigationPath, strokeWidth: 6.0, color: kAccentColor, isDotted: true),
+                ],
+              ),
               if (!_isNavigating) MarkerLayer(markers: _getDirectionArrows()),
               MarkerLayer(markers: [
                 _buildMarker(path.first, Icons.flag_rounded, kAccentColor, "START"),
@@ -842,6 +270,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
                 if (_userLocation != null) 
                   Marker(
                     point: _userLocation!, width: 60, height: 60, 
+                    alignment: Alignment.center, // Arrows center properly
                     child: Transform.rotate(angle: (_currentHeading * (math.pi / 180)), child: Container(decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)]), child: Icon(Icons.arrow_upward_rounded, color: kPrimaryColor, size: 30))),
                   ),
               ]),
@@ -858,30 +287,73 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   }
 
   Widget _buildBlurButton({required IconData icon, Color color = Colors.black87, required VoidCallback onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.all(8),
-        width: 44, height: 44,
-        decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8)]),
-        child: Icon(icon, color: color, size: 24),
-      ),
-    );
+    return GestureDetector(onTap: onTap, child: Container(margin: const EdgeInsets.all(8), width: 44, height: 44, decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 8)]), child: Icon(icon, color: color, size: 24)));
   }
 
   Marker _buildMarker(LatLng pos, IconData icon, Color color, String label) {
+    // Pin-style marker with tip pointing to exact coordinate.
     return Marker(
-      point: pos, width: 80, height: 80,
+      point: pos,
+      width: 100,
+      height: 100,
+      alignment: const Alignment(0.0, 0.0),
       child: GestureDetector(
         onTap: () => _showNavDialog(pos, label),
-        child: Column(children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4)]),
-            child: Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-          ),
-          Icon(icon, color: color, size: 40),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Pin head (rounded top)
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  topRight: Radius.circular(20),
+                  bottomLeft: Radius.circular(12),
+                  bottomRight: Radius.circular(12),
+                ),
+                boxShadow: [
+                  BoxShadow(color: color.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4)),
+                ],
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: Icon(icon, color: Colors.white, size: 22),
+            ),
+            // Pin tip (triangle pointing down)
+            CustomPaint(
+              size: const Size(40, 10),
+              painter: _PinTipPainter(color: color),
+            ),
+            // Marker name label
+            if (label.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: color, width: 0.5),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2)),
+                    ],
+                  ),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    maxLines: 1,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -894,22 +366,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
         decoration: BoxDecoration(color: Colors.white, borderRadius: kCardRadius, boxShadow: kShadow),
         child: Row(
           children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text("Navigating to $_targetName", style: TextStyle(color: Colors.grey[500], fontSize: 12, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 4),
-                Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-                  Text(_timeRemaining.inMinutes.toString(), style: const TextStyle(fontSize: 42, fontWeight: FontWeight.w800, color: Colors.black)),
-                  const Text(" min", style: TextStyle(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.w600)),
-                ]),
-                Text("${(_distanceRemaining/1000).toStringAsFixed(2)} km remaining", style: const TextStyle(fontSize: 16, color: Colors.black54, fontWeight: FontWeight.w500)),
-              ]),
-            ),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: kAccentColor.withOpacity(0.1), shape: BoxShape.circle),
-              child: const Icon(Icons.directions_walk_rounded, size: 32, color: kAccentColor),
-            )
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text("Navigating to $_targetName", style: TextStyle(color: Colors.grey[500], fontSize: 12, fontWeight: FontWeight.w600)), const SizedBox(height: 4), Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [Text(_timeRemaining.inMinutes.toString(), style: const TextStyle(fontSize: 42, fontWeight: FontWeight.w800, color: Colors.black)), const Text(" min", style: TextStyle(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.w600))]), Text("${(_distanceRemaining/1000).toStringAsFixed(2)} km remaining", style: const TextStyle(fontSize: 16, color: Colors.black54, fontWeight: FontWeight.w500))])),
+            Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: kAccentColor.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.directions_walk_rounded, size: 32, color: kAccentColor))
           ],
         ),
       ),
@@ -928,31 +386,9 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
           children: [
             Text(widget.route.name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
             const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _buildInfoItem(Icons.access_time_rounded, "Time", DateFormat('h:mm a').format(widget.route.startTime)),
-                _buildInfoItem(Icons.straighten_rounded, "Dist", "${(widget.route.totalDistance/1000).toStringAsFixed(2)} km"),
-                _buildInfoItem(Icons.flag_rounded, "Stops", "${widget.route.checkpoints.length}"),
-              ],
-            ),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [_buildInfoItem(Icons.access_time_rounded, "Time", DateFormat('h:mm a').format(widget.route.startTime)), _buildInfoItem(Icons.straighten_rounded, "Dist", "${(widget.route.totalDistance/1000).toStringAsFixed(2)} km"), _buildInfoItem(Icons.flag_rounded, "Stops", "${widget.route.checkpoints.length}")]),
             const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: kPrimaryColor,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                ),
-                icon: const Icon(Icons.navigation_rounded),
-                label: const Text("Start Guidance", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                onPressed: () {
-                  final start = widget.route.points.first;
-                  _showNavDialog(LatLng(start.latitude, start.longitude), "Start Point");
-                },
-              ),
-            )
+            SizedBox(width: double.infinity, height: 56, child: FilledButton.icon(style: FilledButton.styleFrom(backgroundColor: kPrimaryColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))), icon: const Icon(Icons.navigation_rounded), label: const Text("Start Guidance", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), onPressed: () { final start = widget.route.points.first; _showNavDialog(LatLng(start.latitude, start.longitude), "Start Point"); })),
           ],
         ),
       ),
@@ -960,56 +396,10 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   }
 
   Widget _buildInfoItem(IconData icon, String label, String value) {
-    return Column(
-      children: [
-        Icon(icon, color: Colors.grey[400], size: 24),
-        const SizedBox(height: 8),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-        Text(label, style: TextStyle(color: Colors.grey[500], fontSize: 12, fontWeight: FontWeight.w600)),
-      ],
-    );
+    return Column(children: [Icon(icon, color: Colors.grey[400], size: 24), const SizedBox(height: 8), Text(value, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)), Text(label, style: TextStyle(color: Colors.grey[500], fontSize: 12, fontWeight: FontWeight.w600))]);
   }
 
   void _showNavDialog(LatLng target, String name) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
-              const SizedBox(height: 24),
-              Text("Navigate to $name?", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Text("This will guide you along the recorded path back to $name.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600], fontSize: 16)),
-              const SizedBox(height: 32),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                      onPressed: () => Navigator.pop(ctx), 
-                      child: const Text("Cancel")
-                    )
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: kPrimaryColor, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                      onPressed: () { Navigator.pop(ctx); _startNavigation(target, name); }, 
-                      child: const Text("Let's Go")
-                    )
-                  ),
-                ],
-              )
-            ],
-          ),
-        ),
-      ),
-    );
+    showModalBottomSheet(context: context, backgroundColor: Colors.white, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))), builder: (ctx) => SafeArea(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))), const SizedBox(height: 24), Text("Navigate to $name?", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)), const SizedBox(height: 8), Text("This will guide you along the recorded path back to $name.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey[600], fontSize: 16)), const SizedBox(height: 32), Row(children: [Expanded(child: OutlinedButton(style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), onPressed: () => Navigator.pop(ctx), child: const Text("Cancel"))), const SizedBox(width: 16), Expanded(child: FilledButton(style: FilledButton.styleFrom(backgroundColor: kPrimaryColor, padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), onPressed: () { Navigator.pop(ctx); _startNavigation(target, name); }, child: const Text("Let's Go")))])]))));
   }
 }
