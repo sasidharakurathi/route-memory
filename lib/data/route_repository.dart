@@ -1,7 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-// --- EXISTING MODELS ---
 class RoutePoint {
   final double latitude;
   final double longitude;
@@ -42,7 +41,7 @@ class SavedRoute {
 class SavedLocation {
   final String id;
   final String name;
-  final String category; // e.g., "Home", "Food", "Park"
+  final String category;
   final double latitude;
   final double longitude;
 
@@ -75,17 +74,13 @@ class SavedLocation {
   }
 }
 
-// --- REPOSITORY ---
 class RouteRepository {
   String get _userId => FirebaseAuth.instance.currentUser?.uid ?? 'guest';
 
-  // Route Collection
   CollectionReference get _routesRef => FirebaseFirestore.instance.collection('users').doc(_userId).collection('routes');
-  
-  // NEW: Location Collection
+
   CollectionReference get _locationsRef => FirebaseFirestore.instance.collection('users').doc(_userId).collection('locations');
 
-  // --- ROUTES (Existing) ---
   Stream<List<SavedRoute>> watchRoutes() {
     return _routesRef.orderBy('startTime', descending: true).snapshots().map((snapshot) {
       return snapshot.docs.map((doc) => SavedRoute.fromMap(doc.data() as Map<String, dynamic>, doc.id)).toList();
@@ -106,7 +101,6 @@ class RouteRepository {
     await batch.commit();
   }
 
-  // --- NEW: LOCATIONS ---
   Stream<List<SavedLocation>> watchLocations() {
     return _locationsRef.orderBy('created', descending: true).snapshots().map((snapshot) {
       return snapshot.docs.map((doc) => SavedLocation.fromMap(doc.data() as Map<String, dynamic>, doc.id)).toList();

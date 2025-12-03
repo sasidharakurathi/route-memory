@@ -18,7 +18,6 @@ import '../logic/auth_provider.dart';
 import 'saved_places_screen.dart';
 import 'constants.dart';
 
-// Imports for the extracted screens
 import 'explore_map_screen.dart';
 import 'active_tracking_view.dart';
 import 'navigation_screen.dart';
@@ -35,14 +34,13 @@ class _PinTipPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
 
     final path = ui.Path();
-    path.moveTo(size.width / 2 - 8, 0); // Left top
-    path.lineTo(size.width / 2 + 8, 0); // Right top
-    path.lineTo(size.width / 2, size.height); // Bottom point
+    path.moveTo(size.width / 2 - 8, 0);
+    path.lineTo(size.width / 2 + 8, 0);
+    path.lineTo(size.width / 2, size.height);
     path.close();
 
     canvas.drawPath(path, paint);
 
-    // Shadow
     final shadowPaint = Paint()
       ..color = color.withOpacity(0.2)
       ..style = PaintingStyle.fill;
@@ -69,7 +67,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  final Set<String> _selectedKeys = {}; 
+  final Set<String> _selectedKeys = {};
   bool get _isSelectionMode => _selectedKeys.isNotEmpty;
 
   void _toggleSelection(String key) {
@@ -110,10 +108,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return Container(margin: const EdgeInsets.only(bottom: 12), decoration: BoxDecoration(color: isSelected ? Colors.blue[50] : Colors.white, borderRadius: BorderRadius.circular(16), border: isSelected ? Border.all(color: kPrimaryColor, width: 2) : null, boxShadow: kShadow), child: Material(color: Colors.transparent, child: InkWell(borderRadius: BorderRadius.circular(16), onLongPress: () => _toggleSelection(route.id), onTap: () { if (_isSelectionMode) _toggleSelection(route.id); else Navigator.push(context, MaterialPageRoute(builder: (_) => RouteDetailScreen(route: route))); }, child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [Container(width: 50, height: 50, decoration: BoxDecoration(color: isSelected ? kPrimaryColor : const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(12)), child: Icon(isSelected ? Icons.check : Icons.cloud_done_rounded, color: isSelected ? Colors.white : kPrimaryColor)), const SizedBox(width: 16), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(route.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), const SizedBox(height: 4), Text("${DateFormat.yMMMd().format(route.startTime)}  •  $distStr", style: TextStyle(fontSize: 13, color: Colors.grey[600], fontWeight: FontWeight.w500))])), if (!_isSelectionMode) Row(mainAxisSize: MainAxisSize.min, children: [IconButton(icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.grey), onPressed: () => _showRenameDialog(route)), IconButton(icon: const Icon(Icons.delete_outline, size: 20, color: Colors.grey), onPressed: () => _confirmDeleteSingle(route))])])))));
   }
 }
-
-// -----------------------------------------------------------------------------
-// 3. DETAIL SCREEN (Navigation Mode)
-// -----------------------------------------------------------------------------
 
 class RouteDetailScreen extends ConsumerStatefulWidget {
   final SavedRoute route;
@@ -251,9 +245,9 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
               // CHANGED: OSM Standard Tiles
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.route_memory',
+                userAgentPackageName: 'com.sasidharakurathi.routememory',
                 retinaMode: true,
-                maxNativeZoom: 19, // FIX ADDED
+                maxNativeZoom: 19,
               ),
               PolylineLayer(
                 polylines: [
@@ -267,10 +261,10 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
                 _buildMarker(path.first, Icons.flag_rounded, kAccentColor, "START"),
                 _buildMarker(path.last, Icons.flag_rounded, kDangerColor, "END"),
                 for (var cp in widget.route.checkpoints) _buildMarker(LatLng(cp.latitude, cp.longitude), Icons.star_rounded, Colors.amber, cp.name),
-                if (_userLocation != null) 
+                if (_userLocation != null)
                   Marker(
-                    point: _userLocation!, width: 60, height: 60, 
-                    alignment: Alignment.center, // Arrows center properly
+                    point: _userLocation!, width: 60, height: 60,
+                    alignment: Alignment.center,
                     child: Transform.rotate(angle: (_currentHeading * (math.pi / 180)), child: Container(decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)]), child: Icon(Icons.arrow_upward_rounded, color: kPrimaryColor, size: 30))),
                   ),
               ]),
@@ -291,7 +285,6 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   }
 
   Marker _buildMarker(LatLng pos, IconData icon, Color color, String label) {
-    // Pin-style marker with tip pointing to exact coordinate.
     return Marker(
       point: pos,
       width: 100,
@@ -302,7 +295,6 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Pin head (rounded top)
             Container(
               width: 40,
               height: 40,
@@ -321,12 +313,10 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
               ),
               child: Icon(icon, color: Colors.white, size: 22),
             ),
-            // Pin tip (triangle pointing down)
             CustomPaint(
               size: const Size(40, 10),
               painter: _PinTipPainter(color: color),
             ),
-            // Marker name label
             if (label.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4),

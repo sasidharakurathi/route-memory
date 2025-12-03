@@ -22,14 +22,13 @@ class _PinTipPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
 
     final path = ui.Path();
-    path.moveTo(size.width / 2 - 8, 0); // Left top
-    path.lineTo(size.width / 2 + 8, 0); // Right top
-    path.lineTo(size.width / 2, size.height); // Bottom point
+    path.moveTo(size.width / 2 - 8, 0);
+    path.lineTo(size.width / 2 + 8, 0);
+    path.lineTo(size.width / 2, size.height);
     path.close();
 
     canvas.drawPath(path, paint);
 
-    // Shadow
     final shadowPaint = Paint()
       ..color = color.withOpacity(0.2)
       ..style = PaintingStyle.fill;
@@ -83,7 +82,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) return;
     }
-    
+
     LocationSettings locationSettings;
     if (defaultTargetPlatform == TargetPlatform.android) {
       locationSettings = AndroidSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 0, forceLocationManager: true, intervalDuration: const Duration(seconds: 1));
@@ -178,7 +177,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.sasidharakurathi.route_memory',
               retinaMode: true,
-              maxNativeZoom: 19, // FIX ADDED
+              maxNativeZoom: 19,
             ),
             if (_routePath.isNotEmpty) PolylineLayer(polylines: [Polyline(points: _routePath, strokeWidth: 6.0, color: kAccentColor, isDotted: true)]),
             MarkerLayer(markers: [

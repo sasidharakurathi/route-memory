@@ -1,4 +1,4 @@
-package com.example.route_memory_app
+package com.sasidharakurathi.routememory
 
 import io.flutter.embedding.android.FlutterActivity
 

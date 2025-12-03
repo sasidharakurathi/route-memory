@@ -10,13 +10,12 @@ class AuthScreen extends ConsumerStatefulWidget {
 }
 
 class _AuthScreenState extends ConsumerState<AuthScreen> {
-  bool _isLogin = true; // Toggle between Login and Signup
+  bool _isLogin = true;
   bool _isLoading = false;
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  // Colors from your theme
   static const kPrimaryColor = Color(0xFF2563EB);
   static const kSurfaceColor = Color(0xFFF3F4F6);
 
@@ -42,7 +41,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString().split(']').last.trim()), // Clean error message
+            content: Text(e.toString().split(']').last.trim()),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),
@@ -64,7 +63,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // LOGO SECTION
               Container(
                 width: 80,
                 height: 80,
@@ -99,8 +97,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 style: TextStyle(fontSize: 16, color: Colors.grey[500]),
               ),
               const SizedBox(height: 32),
-
-              // FORM SECTION
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
@@ -177,8 +173,6 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              
-              // TOGGLE BUTTON
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [

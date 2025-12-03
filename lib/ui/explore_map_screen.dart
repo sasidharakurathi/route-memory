@@ -13,7 +13,6 @@ import '../logic/tracking_provider.dart';
 import 'navigation_screen.dart';
 import 'constants.dart';
 
-// --- CONSTANTS ---
 Color _getCategoryColor(String category) {
   final colors = [
     Colors.blue, Colors.red, Colors.green, Colors.orange,
@@ -35,14 +34,13 @@ class _PinTipPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
 
     final path = ui.Path();
-    path.moveTo(size.width / 2 - 8, 0); // Left top
-    path.lineTo(size.width / 2 + 8, 0); // Right top
-    path.lineTo(size.width / 2, size.height); // Bottom point
+    path.moveTo(size.width / 2 - 8, 0);
+    path.lineTo(size.width / 2 + 8, 0);
+    path.lineTo(size.width / 2, size.height);
     path.close();
 
     canvas.drawPath(path, paint);
 
-    // Shadow
     final shadowPaint = Paint()
       ..color = color.withOpacity(0.2)
       ..style = PaintingStyle.fill;
@@ -67,9 +65,8 @@ class ExploreMapScreen extends ConsumerStatefulWidget {
 class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
   final MapController _mapController = MapController();
   final TextEditingController _searchController = TextEditingController();
-  
-  // Track the selected point (Geographically fixed)
-  LatLng? _selectedLocation; 
+
+  LatLng? _selectedLocation;
   String _selectedAddress = "Selected Location";
   
   bool _isMapReady = false;
@@ -79,27 +76,26 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
 
   @override void initState() { super.initState(); _startLocationStream(); }
   @override void dispose() { _positionStream?.cancel(); _searchController.dispose(); super.dispose(); }
-  
-  void _startLocationStream() { 
-    const locationSettings = LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5); 
-    _positionStream = Geolocator.getPositionStream(locationSettings: locationSettings).listen((Position position) { 
-      if (mounted) { setState(() => _userLocation = LatLng(position.latitude, position.longitude)); } 
-    }); 
-  }
-  
-  void _onMapReady() async { 
-    setState(() => _isMapReady = true); 
-    try { 
-      final pos = await Geolocator.getLastKnownPosition(); 
-      if (pos != null) { 
-        final initialPos = LatLng(pos.latitude, pos.longitude);
-        _mapController.move(initialPos, 16.0); 
-        setState(() => _userLocation = initialPos); 
-      } 
-    } catch (e) {} 
+
+  void _startLocationStream() {
+    const locationSettings = LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 5);
+    _positionStream = Geolocator.getPositionStream(locationSettings: locationSettings).listen((Position position) {
+      if (mounted) { setState(() => _userLocation = LatLng(position.latitude, position.longitude)); }
+    });
   }
 
-  // --- TAP TO SELECT ---
+  void _onMapReady() async {
+    setState(() => _isMapReady = true);
+    try {
+      final pos = await Geolocator.getLastKnownPosition();
+      if (pos != null) {
+        final initialPos = LatLng(pos.latitude, pos.longitude);
+        _mapController.move(initialPos, 16.0);
+        setState(() => _userLocation = initialPos);
+      }
+    } catch (e) {}
+  }
+
   void _onMapTap(TapPosition tapPosition, LatLng point) {
     setState(() {
       _selectedLocation = point;
@@ -131,36 +127,36 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
 
   void _showSearchResults(List results) {
     showModalBottomSheet(
-      context: context, 
-      backgroundColor: Colors.white, 
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))), 
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => Container(
-        padding: const EdgeInsets.all(16), 
-        height: 400, 
+        padding: const EdgeInsets.all(16),
+        height: 400,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text("Search Results", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)), 
-          const SizedBox(height: 10), 
+          const Text("Search Results", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
           Expanded(child: ListView.separated(
             itemCount: results.length, 
             separatorBuilder: (_,__) => const Divider(), 
             itemBuilder: (context, index) { 
-              final place = results[index]; 
+              final place = results[index];
               return ListTile(
-                leading: const Icon(Icons.location_on, color: Colors.redAccent), 
-                title: Text(place['display_name'] ?? 'Unknown', maxLines: 2, overflow: TextOverflow.ellipsis), 
-                onTap: () { 
-                  Navigator.pop(ctx); 
-                  final lat = double.parse(place['lat']); 
-                  final lon = double.parse(place['lon']); 
+                leading: const Icon(Icons.location_on, color: Colors.redAccent),
+                title: Text(place['display_name'] ?? 'Unknown', maxLines: 2, overflow: TextOverflow.ellipsis),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  final lat = double.parse(place['lat']);
+                  final lon = double.parse(place['lon']);
                   final pos = LatLng(lat, lon);
-                  
-                  _mapController.move(pos, 16.0); 
+
+                  _mapController.move(pos, 16.0);
                   setState(() {
                     _selectedLocation = pos;
                     _selectedAddress = place['display_name']?.split(',')[0] ?? "Searched Place";
                   });
                 }
-              ); 
+              );
             }
           ))
         ])
@@ -168,7 +164,7 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
     );
   }
 
-  void _showAddLocationDialog() { 
+  void _showAddLocationDialog() {
     if (_selectedLocation == null) return;
     _showAddLocationDialogBase(context, ref, _selectedLocation!, defaultName: _selectedAddress == "Selected Location" ? null : _selectedAddress); 
   }
@@ -196,9 +192,9 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.route_memory',
-                retinaMode: true, // Makes it sharp on high-res screens
-                maxNativeZoom: 19, // FIX: Prevents blur by limiting where it looks for new tiles
+                userAgentPackageName: 'com.sasidharakurathi.routememory',
+                retinaMode: true,
+                maxNativeZoom: 19,
               ),
               savedLocationsAsync.when(
                   data: (locs) => MarkerLayer(

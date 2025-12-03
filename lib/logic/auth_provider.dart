@@ -1,7 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-// This provider gives us the current user (or null if logged out)
 final authStateProvider = StreamProvider<User?>((ref) {
   return FirebaseAuth.instance.authStateChanges();
 });
@@ -9,7 +8,6 @@ final authStateProvider = StreamProvider<User?>((ref) {
 class AuthRepository {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Sign Up with Email/Password
   Future<void> signUp(String email, String password) async {
     await _auth.createUserWithEmailAndPassword(
       email: email,
@@ -17,7 +15,6 @@ class AuthRepository {
     );
   }
 
-  // Login with Email/Password
   Future<void> signIn(String email, String password) async {
     await _auth.signInWithEmailAndPassword(
       email: email,
@@ -25,11 +22,9 @@ class AuthRepository {
     );
   }
 
-  // Logout
   Future<void> signOut() async {
     await _auth.signOut();
   }
 }
 
-// Expose the repository to the UI
 final authRepositoryProvider = Provider((ref) => AuthRepository());

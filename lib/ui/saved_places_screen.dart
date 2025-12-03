@@ -41,7 +41,6 @@ class SavedPlacesScreen extends ConsumerWidget {
             );
           }
 
-          // Group by Category
           final Map<String, List<SavedLocation>> grouped = {};
           for (var loc in locations) {
             if (!grouped.containsKey(loc.category)) grouped[loc.category] = [];

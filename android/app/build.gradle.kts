@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.route_memory_app"
+    namespace = "com.sasidharakurathi.routememory"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 

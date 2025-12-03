@@ -9,8 +9,6 @@ import 'logic/auth_provider.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
-  
-  // Note: We removed signInAnonymously() because we now have a real login screen.
 
   runApp(const ProviderScope(child: RouteMemoryApp()));
 }
@@ -22,9 +20,8 @@ class RouteMemoryApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     const primaryColor = Color(0xFF2563EB); 
     const accentColor = Color(0xFF10B981);  
-    const surfaceColor = Color(0xFFF3F4F6); 
+    const surfaceColor = Color(0xFFF3F4F6);
 
-    // Listen to Auth State
     final authState = ref.watch(authStateProvider);
 
     return MaterialApp(
@@ -53,7 +50,6 @@ class RouteMemoryApp extends ConsumerWidget {
           ),
         ),
       ),
-      // Show Loading, Login, or Home based on Auth State
       home: authState.when(
         data: (user) {
           if (user != null) {

@@ -5,17 +5,13 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import '../data/route_repository.dart';
 
-// --- REPOSITORY PROVIDER ---
 final repositoryProvider = Provider((ref) => RouteRepository());
 
-// --- SAVED ROUTES PROVIDER (Now uses Stream) ---
 final savedRoutesProvider = StreamProvider<List<SavedRoute>>((ref) {
   final repo = ref.watch(repositoryProvider);
   return repo.watchRoutes();
 });
 
-// --- ACTIVE TRACKING PROVIDER ---
-// (State class remains the same)
 class TrackingState {
   final bool isTracking;
   final List<LatLng> currentPath;
@@ -82,7 +78,7 @@ class TrackingNotifier extends StateNotifier<TrackingState> {
       locationSettings = AndroidSettings(
         accuracy: LocationAccuracy.bestForNavigation,
         distanceFilter: 0,
-        forceLocationManager: true, 
+        forceLocationManager: true,
         intervalDuration: const Duration(seconds: 1),
       );
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
@@ -105,10 +101,10 @@ class TrackingNotifier extends StateNotifier<TrackingState> {
         if (state.rawPoints.isNotEmpty) {
           final last = state.rawPoints.last;
           addedDist = Geolocator.distanceBetween(
-            last.latitude, last.longitude, 
+            last.latitude, last.longitude,
             position.latitude, position.longitude
           );
-          if (addedDist < 0.5) addedDist = 0; 
+          if (addedDist < 0.5) addedDist = 0;
         }
 
         final newPoint = RoutePoint(

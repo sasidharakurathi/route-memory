@@ -13,7 +13,6 @@ import '../logic/tracking_provider.dart';
 import '../logic/location_provider.dart';
 import 'constants.dart';
 
-// --- CONSTANTS ---
 Color _getCategoryColor(String category) {
   final colors = [
     Colors.blue, Colors.red, Colors.green, Colors.orange,
@@ -35,14 +34,13 @@ class _PinTipPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
 
     final path = ui.Path();
-    path.moveTo(size.width / 2 - 8, 0); // Left top
-    path.lineTo(size.width / 2 + 8, 0); // Right top
-    path.lineTo(size.width / 2, size.height); // Bottom point
+    path.moveTo(size.width / 2 - 8, 0);
+    path.lineTo(size.width / 2 + 8, 0);
+    path.lineTo(size.width / 2, size.height);
     path.close();
 
     canvas.drawPath(path, paint);
 
-    // Shadow
     final shadowPaint = Paint()
       ..color = color.withOpacity(0.2)
       ..style = PaintingStyle.fill;
@@ -142,9 +140,9 @@ class _ActiveTrackingViewState extends ConsumerState<ActiveTrackingView> {
               children: [
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.example.route_memory',
+                  userAgentPackageName: 'com.sasidharakurathi.routememory',
                   retinaMode: true,
-                  maxNativeZoom: 19, // FIX ADDED
+                  maxNativeZoom: 19,
                 ),
                 PolylineLayer(polylines: [
                   Polyline(
