@@ -49,6 +49,9 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   bool _isMapReady = false;
   LatLng? _lastFetchPos;
   
+  // Loading State
+  bool _isRouteLoading = true;
+  
   List<NavigationStep> _steps = [];
   NavigationStep? _currentStep;
 
@@ -81,7 +84,6 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
     if (diff < -180) diff += 360;
     if (diff > 180) diff -= 360;
     
-    
     _prevHeading += diff;
     
     if (_shouldAutoCenter && _userLocation != null && _isHeadsUpMode) {
@@ -90,22 +92,38 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
   }
 
   void _startNavigation() async {
+    // 1. Check Permissions
     LocationPermission permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return;
+      if (permission == LocationPermission.denied) {
+        if (mounted) Navigator.pop(context); // Exit if denied
+        return;
+      }
     }
 
+    // 2. Get Initial Position & Route
     try {
       final initialPos = await Geolocator.getCurrentPosition();
       if (mounted) {
         final startLatLng = LatLng(initialPos.latitude, initialPos.longitude);
         _userLocation = startLatLng;
+        // Fetch the initial route before hiding the loading screen
         await _fetchRoadRoute(startLatLng, widget.target);
-        if (mounted) setState(() => _lastFetchPos = startLatLng);
+        
+        if (mounted) {
+          setState(() {
+            _lastFetchPos = startLatLng;
+            _isRouteLoading = false; // Stop loading only after we have data
+          });
+        }
       }
-    } catch (e) { debugPrint("Error getting initial pos: $e"); }
+    } catch (e) { 
+      debugPrint("Error getting initial pos: $e");
+      if (mounted) setState(() => _isRouteLoading = false);
+    }
 
+    // 3. Start Stream
     LocationSettings locationSettings;
     if (defaultTargetPlatform == TargetPlatform.android) {
       locationSettings = AndroidSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 0, forceLocationManager: true, intervalDuration: const Duration(milliseconds: 500));
@@ -118,7 +136,13 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
       _currentSpeed = position.speed; 
 
       if (mounted) {
-        setState(() => _userLocation = userPos);
+        // If we somehow got a stream update before the initial fetch finished, ensure loading is off and location is set
+        bool wasLoading = _isRouteLoading;
+        setState(() {
+          _userLocation = userPos;
+          if (wasLoading) _isRouteLoading = false;
+        });
+        
         if (_isMapReady && _shouldAutoCenter) {
           if (_isHeadsUpMode) {
              _mapController.moveAndRotate(userPos, 18.0, -_prevHeading);
@@ -208,12 +232,54 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
     return "${mins}m ${secs}s";
   }
 
+  Widget _buildLoadingScreen(ThemeData theme) {
+    return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
+      appBar: AppBar(
+        title: const Text("Navigation"),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: theme.iconTheme.color),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+              width: 50,
+              height: 50,
+              child: CircularProgressIndicator(strokeWidth: 3, color: kPrimaryColor),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              "Calculating Route...",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.textTheme.bodyMedium?.color),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Acquiring GPS & Traffic Data",
+              style: TextStyle(color: theme.textTheme.bodySmall?.color),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final mapSettings = ref.watch(settingsProvider);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     
+    // Check Loading State
+    if (_isRouteLoading || _userLocation == null) {
+      return _buildLoadingScreen(theme);
+    }
+
     final topPadding = MediaQuery.of(context).padding.top;
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     final distStr = ref.read(settingsProvider.notifier).getFormattedDistance(_distanceRemaining);
@@ -229,12 +295,12 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: widget.target, initialZoom: 18.0,
+              initialCenter: _userLocation ?? widget.target, 
+              initialZoom: 18.0,
               interactionOptions: InteractionOptions(flags: interactionFlags),
               onMapReady: () async {
                 setState(() => _isMapReady = true);
-                final pos = await Geolocator.getLastKnownPosition();
-                if (pos != null) _mapController.move(LatLng(pos.latitude, pos.longitude), 18.0);
+                if (_userLocation != null) _mapController.move(_userLocation!, 18.0);
               },
               onPositionChanged: (pos, hasGesture) { if (hasGesture) setState(() => _shouldAutoCenter = false); },
             ),
@@ -267,7 +333,6 @@ class _NavigationScreenState extends ConsumerState<NavigationScreen> with Ticker
                   Marker(
                     point: _userLocation!, 
                     width: 60, height: 60, 
-                    
                     child: const RepaintBoundary(child: UserLocationMarker())
                   )
               ])

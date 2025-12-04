@@ -128,7 +128,7 @@ class SettingsScreen extends ConsumerWidget {
               children: [
                 _buildAboutTile(context, Icons.code, "Developer", "Made by Sasidhar Akurathi"),
                 Divider(height: 1, color: dividerColor),
-                _buildAboutTile(context, Icons.info_outline, "Version", "1.1.0 (Alpha Build)"),
+                _buildAboutTile(context, Icons.info_outline, "Version", "1.2.0 (Alpha Build)"),
                 Divider(height: 1, color: dividerColor),
                 _buildAboutTile(context, Icons.source, "Project Status", "Open Source (Flutter & OSRM)"),
                 Divider(height: 1, color: dividerColor),

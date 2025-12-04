@@ -102,19 +102,55 @@ class _ActiveTrackingViewState extends ConsumerState<ActiveTrackingView> {
     }
   }
 
+  Widget _buildLoadingScreen(ThemeData theme) {
+    return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
+      appBar: AppBar(
+        title: const Text("Active Tracking"),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+              width: 50,
+              height: 50,
+              child: CircularProgressIndicator(strokeWidth: 3, color: kPrimaryColor),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              "Acquiring Satellites...",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.textTheme.bodyMedium?.color),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Waiting for GPS lock",
+              style: TextStyle(color: theme.textTheme.bodySmall?.color),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    
     final mapSettings = ref.watch(settingsProvider);
     final trackingState = ref.watch(trackingProvider);
     final savedLocationsAsync = ref.watch(savedLocationsProvider);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    // Loading State Check: If we have no points yet, we are waiting for GPS
+    if (trackingState.currentPath.isEmpty) {
+      return _buildLoadingScreen(theme);
+    }
     
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     final topPadding = MediaQuery.of(context).padding.top;
-    
-    
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
     ref.listen(trackingProvider, (prev, next) {
       if (_isMapReady && next.currentPath.isNotEmpty && _shouldAutoCenter) {
@@ -127,7 +163,6 @@ class _ActiveTrackingViewState extends ConsumerState<ActiveTrackingView> {
         : const LatLng(0, 0);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      
       value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
         body: Stack(
@@ -153,7 +188,6 @@ class _ActiveTrackingViewState extends ConsumerState<ActiveTrackingView> {
                     retinaMode: mapSettings.retinaMode,
                     panBuffer: mapSettings.panBuffer,
                     tileBuilder: (context, widget, tile) {
-                      
                       return ColorFiltered(
                         colorFilter: const ColorFilter.matrix([
                           -1,  0,  0, 0, 255, 

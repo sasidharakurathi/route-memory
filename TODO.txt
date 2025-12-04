@@ -45,7 +45,12 @@
   Implement Themes (Dark / Light Mode) -> Done
   
 04 DEC 2025:  
-  Add Loading Symbols to all the Screens
-  Enhance Search option (Dynamic Searching)
+  Add Loading Symbols to all the Screens      -> Done
+  Enhance Search option (Dynamic Searching)   -> Done
+  System Testing and Security Testing         -> Done
+  Bug fixes                                   -> Done
+  Documentation                               -> Done
+  Create App Logo and change Splash Screen    -> Done
+  Final App Build                             -> Done
 
 	

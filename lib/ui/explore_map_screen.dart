@@ -70,19 +70,45 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
   
   bool _shouldAutoCenter = true; 
   bool _hasCenteredOnce = false;
+  bool _isLoading = true;
 
-  @override void initState() { super.initState(); _startLocationStream(); }
-  @override void dispose() { _positionStream?.cancel(); _searchController.dispose(); super.dispose(); }
+  // Search Logic Variables
+  Timer? _debounce;
+  List<dynamic> _searchResults = [];
+  bool _showResults = false;
 
-  void _startLocationStream() {
-    const locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.bestForNavigation, 
-      distanceFilter: 0 
-    );
+  @override 
+  void initState() { 
+    super.initState(); 
+    _initLocation(); 
+  }
+
+  @override 
+  void dispose() { 
+    _positionStream?.cancel(); 
+    _debounce?.cancel();
+    _searchController.dispose(); 
+    super.dispose(); 
+  }
+
+  Future<void> _initLocation() async {
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+    }
+
+    const locationSettings = LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 0);
     _positionStream = Geolocator.getPositionStream(locationSettings: locationSettings).listen((Position position) {
       if (mounted) { 
         final pos = LatLng(position.latitude, position.longitude);
-        setState(() => _userLocation = pos);
+        setState(() {
+          _userLocation = pos;
+          if (_isLoading) _isLoading = false; 
+        });
         
         if ((!_hasCenteredOnce || _shouldAutoCenter) && _isMapReady) {
           _mapController.move(pos, 16.0);
@@ -90,19 +116,24 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
         }
       }
     });
-  }
 
-  void _onMapReady() async {
-    setState(() => _isMapReady = true);
     try {
       final pos = await Geolocator.getLastKnownPosition();
-      if (pos != null) {
-        final initialPos = LatLng(pos.latitude, pos.longitude);
-        _mapController.move(initialPos, 16.0);
-        setState(() => _userLocation = initialPos);
-        _hasCenteredOnce = true;
+      if (pos != null && mounted && _isLoading) {
+        setState(() {
+          _userLocation = LatLng(pos.latitude, pos.longitude);
+          _isLoading = false;
+        });
       }
-    } catch (e) {}
+    } catch (e) { /* Ignore */ }
+  }
+
+  void _onMapReady() {
+    setState(() => _isMapReady = true);
+    if (_userLocation != null && !_hasCenteredOnce) {
+        _mapController.move(_userLocation!, 16.0);
+        _hasCenteredOnce = true;
+    }
   }
 
   void _onMapTap(TapPosition tapPosition, LatLng point) {
@@ -110,6 +141,8 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
       _selectedLocation = point;
       _selectedAddress = "Selected Location"; 
       _shouldAutoCenter = false; 
+      _showResults = false; // Close results on map tap
+      FocusScope.of(context).unfocus(); // Dismiss keyboard
     });
   }
 
@@ -118,75 +151,79 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
     if (_userLocation != null) _mapController.move(_userLocation!, 16.0);
   }
 
-  Future<void> _searchPlaces() async {
-    final query = _searchController.text.trim();
-    if (query.isEmpty) return;
+  // --- Dynamic Search Logic ---
+
+  void _onSearchChanged(String query) {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    
+    if (query.isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _showResults = false;
+        _isSearching = false;
+      });
+      return;
+    }
+
+    // Debounce: Wait 1 second (1000ms) before calling API to respect rate limits
+    _debounce = Timer(const Duration(milliseconds: 1000), () {
+      _performSearch(query);
+    });
+  }
+
+  Future<void> _performSearch(String query) async {
     setState(() => _isSearching = true);
-    FocusScope.of(context).unfocus();
     try {
-      final url = Uri.https('nominatim.openstreetmap.org', '/search', {'q': query, 'format': 'json', 'limit': '5'});
+      final url = Uri.https('nominatim.openstreetmap.org', '/search', {
+        'q': query, 
+        'format': 'json', 
+        'limit': '5',
+        'addressdetails': '1',
+      });
+      
       final request = await HttpClient().getUrl(url);
       request.headers.set(HttpHeaders.userAgentHeader, 'RouteMemoryApp/1.0 (flutter_student_project)');
       final response = await request.close();
+      
       if (response.statusCode == 200) {
         final jsonString = await response.transform(utf8.decoder).join();
         final data = jsonDecode(jsonString) as List;
         if (mounted) {
-          if (data.isNotEmpty) _showSearchResults(data);
-          else ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No places found.")));
+          setState(() {
+            _searchResults = data;
+            _showResults = true;
+          });
         }
       }
-    } catch (e) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Search failed: $e"))); }
-    finally { if (mounted) setState(() => _isSearching = false); }
+    } catch (e) { 
+      debugPrint("Search error: $e"); 
+    } finally { 
+      if (mounted) setState(() => _isSearching = false); 
+    }
   }
 
-  void _showSearchResults(List results) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Theme.of(context).cardColor, 
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) {
-        final theme = Theme.of(ctx);
-        return Container(
-          padding: const EdgeInsets.all(16),
-          height: 400,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text("Search Results", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.textTheme.bodyMedium?.color)),
-            const SizedBox(height: 10),
-            Expanded(child: ListView.separated(
-              itemCount: results.length, 
-              separatorBuilder: (_,__) => Divider(color: theme.dividerColor), 
-              itemBuilder: (context, index) { 
-                final place = results[index];
-                return ListTile(
-                  leading: const Icon(Icons.location_on, color: Colors.redAccent),
-                  title: Text(
-                    place['display_name'] ?? 'Unknown', 
-                    maxLines: 2, 
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: theme.textTheme.bodyMedium?.color),
-                  ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    final lat = double.parse(place['lat']);
-                    final lon = double.parse(place['lon']);
-                    final pos = LatLng(lat, lon);
+  void _selectSearchResult(dynamic place) {
+    final lat = double.parse(place['lat']);
+    final lon = double.parse(place['lon']);
+    final pos = LatLng(lat, lon);
+    final displayName = place['display_name'] ?? "Unknown";
 
-                    _mapController.move(pos, 16.0);
-                    setState(() {
-                      _selectedLocation = pos;
-                      _selectedAddress = place['display_name']?.split(',')[0] ?? "Searched Place";
-                      _shouldAutoCenter = false; 
-                    });
-                  }
-                );
-              }
-            ))
-          ])
-        );
-      }
-    );
+    // Extract a shorter name (usually the first part before the comma)
+    final shortName = displayName.split(',')[0];
+
+    _mapController.move(pos, 16.0);
+    setState(() {
+      _selectedLocation = pos;
+      _selectedAddress = shortName;
+      _searchController.text = shortName; // Update text field
+      _shouldAutoCenter = false;
+      _showResults = false;
+      _searchResults = [];
+    });
+    FocusScope.of(context).unfocus();
   }
+
+  // --- End Dynamic Search Logic ---
 
   void _showAddLocationDialog() {
     if (_selectedLocation == null) return;
@@ -201,26 +238,36 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
     });
   }
 
+  Widget _buildLoadingScreen(ThemeData theme) {
+    return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
+      appBar: AppBar(title: const Text("Explore"), backgroundColor: Colors.transparent, elevation: 0, leading: IconButton(icon: Icon(Icons.arrow_back, color: theme.iconTheme.color), onPressed: () => Navigator.pop(context))),
+      body: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [const SizedBox(width: 50, height: 50, child: CircularProgressIndicator(strokeWidth: 3, color: kPrimaryColor)), const SizedBox(height: 24), Text("Finding You...", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.textTheme.bodyMedium?.color)), const SizedBox(height: 8), Text("Getting your location for exploration", style: TextStyle(color: theme.textTheme.bodySmall?.color))])),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final mapSettings = ref.watch(settingsProvider);
     final savedLocationsAsync = ref.watch(savedLocationsProvider);
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     
-    
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+
+    if (_isLoading && _userLocation == null) return _buildLoadingScreen(theme);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
+        resizeToAvoidBottomInset: false, // Prevents map resize when keyboard opens
         body: Stack(
           children: [
             FlutterMap(
               mapController: _mapController,
               options: MapOptions(
                 onMapReady: _onMapReady,
-                initialCenter: const LatLng(0,0),
+                initialCenter: _userLocation ?? const LatLng(0,0),
                 initialZoom: 16.0,
                 onTap: _onMapTap,
                 interactionOptions: InteractionOptions(flags: mapSettings.interactionFlags),
@@ -229,32 +276,10 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
                 }
               ),
               children: [
-                
                 if (isDark)
-                  TileLayer(
-                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.sasidharakurathi.routememory',
-                    retinaMode: mapSettings.retinaMode,
-                    panBuffer: mapSettings.panBuffer,
-                    tileBuilder: (context, widget, tile) {
-                      return ColorFiltered(
-                        colorFilter: const ColorFilter.matrix([
-                          -1,  0,  0, 0, 255, 
-                           0, -1,  0, 0, 255, 
-                           0,  0, -1, 0, 255, 
-                           0,  0,  0, 1,   0, 
-                        ]),
-                        child: widget,
-                      );
-                    },
-                  )
+                  TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.sasidharakurathi.routememory', retinaMode: mapSettings.retinaMode, panBuffer: mapSettings.panBuffer, tileBuilder: (context, widget, tile) => ColorFiltered(colorFilter: const ColorFilter.matrix([-1,0,0,0,255, 0,-1,0,0,255, 0,0,-1,0,255, 0,0,0,1,0]), child: widget))
                 else
-                  TileLayer(
-                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.sasidharakurathi.routememory',
-                    retinaMode: mapSettings.retinaMode,
-                    panBuffer: mapSettings.panBuffer,
-                  ),
+                  TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', userAgentPackageName: 'com.sasidharakurathi.routememory', retinaMode: mapSettings.retinaMode, panBuffer: mapSettings.panBuffer),
                   
                 savedLocationsAsync.when(
                     data: (locs) => MarkerLayer(
@@ -270,27 +295,11 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
                               children: [
                                 Container(
                                   width: 40, height: 40,
-                                  decoration: BoxDecoration(
-                                    color: _getCategoryColor(l.category),
-                                    borderRadius: const BorderRadius.only(
-                                      topLeft: Radius.circular(20), topRight: Radius.circular(20),
-                                      bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12),
-                                    ),
-                                    boxShadow: [BoxShadow(color: _getCategoryColor(l.category).withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))],
-                                    border: Border.all(color: Colors.white, width: 2),
-                                  ),
+                                  decoration: BoxDecoration(color: _getCategoryColor(l.category), borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20), bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12)), boxShadow: [BoxShadow(color: _getCategoryColor(l.category).withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))], border: Border.all(color: Colors.white, width: 2)),
                                   child: Icon(Icons.location_on, color: Colors.white, size: 22),
                                 ),
                                 CustomPaint(size: const Size(40, 10), painter: _PinTipPainter(color: _getCategoryColor(l.category))),
-                                if (l.name.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: _getCategoryColor(l.category), width: 0.5), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2))]),
-                                      child: Text(l.name, style: TextStyle(color: _getCategoryColor(l.category), fontSize: 11, fontWeight: FontWeight.bold, overflow: TextOverflow.ellipsis), maxLines: 1),
-                                    ),
-                                  ),
+                                if (l.name.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4), child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: _getCategoryColor(l.category), width: 0.5), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2))]), child: Text(l.name, style: TextStyle(color: _getCategoryColor(l.category), fontSize: 11, fontWeight: FontWeight.bold, overflow: TextOverflow.ellipsis), maxLines: 1))),
                               ],
                             ),
                           ),
@@ -301,44 +310,93 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
                     error: (_,__) => const MarkerLayer(markers: []),
                 ),
                 if (_selectedLocation != null)
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: _selectedLocation!,
-                        width: 100, height: 100,
-                        alignment: const Alignment(0.0, 0.0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 40, height: 40,
-                              decoration: BoxDecoration(
-                                color: kPrimaryColor,
-                                borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20), bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12)),
-                                boxShadow: [BoxShadow(color: kPrimaryColor.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))],
-                                border: Border.all(color: Colors.white, width: 2),
-                              ),
-                              child: const Icon(Icons.location_on, color: Colors.white, size: 22),
-                            ),
-                            CustomPaint(size: const Size(40, 10), painter: _PinTipPainter(color: kPrimaryColor)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                  MarkerLayer(markers: [Marker(point: _selectedLocation!, width: 100, height: 100, alignment: const Alignment(0.0, 0.0), child: Column(mainAxisSize: MainAxisSize.min, children: [Container(width: 40, height: 40, decoration: BoxDecoration(color: kPrimaryColor, borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20), bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12)), boxShadow: [BoxShadow(color: kPrimaryColor.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))], border: Border.all(color: Colors.white, width: 2)), child: const Icon(Icons.location_on, color: Colors.white, size: 22)), CustomPaint(size: const Size(40, 10), painter: _PinTipPainter(color: kPrimaryColor))]))]),
                 if (_userLocation != null)
-                  MarkerLayer(markers: [
-                    Marker(
-                      point: _userLocation!, 
-                      width: 60, height: 60, 
-                      child: const UserLocationMarker()
-                    )
-                  ]),
+                  MarkerLayer(markers: [Marker(point: _userLocation!, width: 60, height: 60, child: const UserLocationMarker())]),
               ],
             ),
             
-            
-            Positioned(top: MediaQuery.of(context).padding.top + 10, left: 16, right: 16, child: Container(decoration: BoxDecoration(color: theme.cardColor, borderRadius: BorderRadius.circular(12), boxShadow: kShadow), child: Row(children: [IconButton(icon: Icon(Icons.arrow_back, color: theme.iconTheme.color), onPressed: () => Navigator.pop(context)), Expanded(child: TextField(controller: _searchController, style: TextStyle(color: theme.textTheme.bodyMedium?.color), decoration: InputDecoration(hintText: "Search places...", hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.black38), border: InputBorder.none), textInputAction: TextInputAction.search, onSubmitted: (_) => _searchPlaces())), if (_isSearching) const Padding(padding: EdgeInsets.all(12.0), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))) else IconButton(icon: const Icon(Icons.search, color: kPrimaryColor), onPressed: _searchPlaces)]))),
+            // --- Enhanced Search Bar & Results ---
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 10, 
+              left: 16, 
+              right: 16, 
+              child: Column(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(color: theme.cardColor, borderRadius: BorderRadius.circular(12), boxShadow: kShadow), 
+                    child: Row(
+                      children: [
+                        IconButton(icon: Icon(Icons.arrow_back, color: theme.iconTheme.color), onPressed: () => Navigator.pop(context)), 
+                        Expanded(
+                          child: TextField(
+                            controller: _searchController, 
+                            style: TextStyle(color: theme.textTheme.bodyMedium?.color), 
+                            decoration: InputDecoration(
+                              hintText: "Search places...", 
+                              hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.black38), 
+                              border: InputBorder.none,
+                              suffixIcon: _searchController.text.isNotEmpty 
+                                ? IconButton(
+                                    icon: const Icon(Icons.clear, size: 20),
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      _onSearchChanged('');
+                                    },
+                                  )
+                                : null
+                            ), 
+                            textInputAction: TextInputAction.search, 
+                            onChanged: _onSearchChanged,
+                            onSubmitted: (val) {
+                                if (val.isNotEmpty) _performSearch(val);
+                            },
+                          )
+                        ), 
+                        if (_isSearching) 
+                          const Padding(padding: EdgeInsets.all(12.0), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))) 
+                        else 
+                          IconButton(icon: const Icon(Icons.search, color: kPrimaryColor), onPressed: () => _performSearch(_searchController.text))
+                      ]
+                    )
+                  ),
+                  
+                  // Dynamic Results List
+                  if (_showResults && _searchResults.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      constraints: const BoxConstraints(maxHeight: 300),
+                      decoration: BoxDecoration(
+                        color: theme.cardColor,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: kShadow,
+                      ),
+                      child: ListView.separated(
+                        padding: EdgeInsets.zero,
+                        shrinkWrap: true,
+                        itemCount: _searchResults.length,
+                        separatorBuilder: (ctx, i) => Divider(height: 1, color: theme.dividerColor),
+                        itemBuilder: (ctx, i) {
+                          final place = _searchResults[i];
+                          final name = place['display_name'] ?? 'Unknown';
+                          final parts = name.toString().split(',');
+                          final mainName = parts[0];
+                          final subName = parts.length > 1 ? parts.sublist(1).join(',').trim() : '';
+
+                          return ListTile(
+                            leading: const Icon(Icons.location_on_outlined, size: 20, color: kPrimaryColor),
+                            title: Text(mainName, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: theme.textTheme.bodyMedium?.color)),
+                            subtitle: subName.isNotEmpty ? Text(subName, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: theme.textTheme.bodySmall?.color)) : null,
+                            dense: true,
+                            onTap: () => _selectSearchResult(place),
+                          );
+                        },
+                      ),
+                    )
+                ],
+              )
+            ),
+            // --- End Enhanced Search ---
             
             if (_userLocation != null)
               Positioned(
@@ -385,7 +443,6 @@ class _ExploreMapScreenState extends ConsumerState<ExploreMapScreen> {
                         height: 50,
                         child: FilledButton.icon(
                           style: FilledButton.styleFrom(
-                            
                             backgroundColor: isDark ? kPrimaryColor : Colors.black87,
                             foregroundColor: Colors.white, 
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
